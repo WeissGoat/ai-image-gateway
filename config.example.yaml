@@ -1,0 +1,51 @@
+# AI Image Gateway 配置模板
+# 复制为 config.yaml 并填入实际值。
+# 凭证字段支持 ${ENV_VAR} 语法引用环境变量。
+
+default_provider:
+  generate: mock          # 可改为 novelai
+  inpaint: mock
+  upscale: mock
+
+providers:
+  mock:
+    enabled: true
+    settings:
+      bg_color: "#2a2a3d"
+      text_color: "#e0c878"
+
+  novelai:
+    enabled: true        # 启用时改为 true
+    auth:
+      # 三选一 (优先级从高到低):
+      # access_token: ${NAI_ACCESS_TOKEN}   # 直接提供 JWT token
+      # access_key: ${NAI_ACCESS_KEY}       # access_key, 自动 login
+      username: ${NAI_USERNAME}             # 账号密码, 自动 hash + login
+      password: ${NAI_PASSWORD}
+    settings:
+      model: nai-diffusion-4-5-full         # 模型选择
+      sampler: k_euler                      # 采样器
+      scheduler: native                     # 调度器
+      steps: 28                             # 步数
+      cfg: 5.0                              # CFG scale
+      cfg_rescale: 0.0
+      uncond_scale: 1.0
+      uc_preset: 3
+      smea: none                            # none / SMEA / SMEA+DYN
+      variety: false
+      decrisper: false
+      limit_opus_free: true                 # Opus 免费限制
+      timeout: 120                          # 超时秒数
+      retry: 3                              # 重试次数
+
+  # gemini:
+  #   enabled: false
+  #   auth:
+  #     api_key: ${GEMINI_API_KEY}
+  #   settings:
+  #     model: imagen-4.0-generate-001
+  #     safety_filter: block_none
+
+logging:
+  level: INFO
+  # file: ./logs/ai_image_gateway.log

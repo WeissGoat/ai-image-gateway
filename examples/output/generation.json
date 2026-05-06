@@ -1,0 +1,43 @@
+{
+  "BatchID": "batch_20260505_232851",
+  "RequestID": "8a094357088b4d23b8b0b2049bae09ae",
+  "Provider": "mock",
+  "Model": "mock-v1",
+  "TotalCost": 0.0,
+  "Outputs": [
+    {
+      "Filename": "3672846062.png",
+      "Seed": 3672846062,
+      "Params": {
+        "prompt": "tactical blade icon, steampunk",
+        "negative_prompt": "text, watermark",
+        "width": 512,
+        "height": 512,
+        "seed": 3672846062
+      }
+    },
+    {
+      "Filename": "1682489570.png",
+      "Seed": 1682489570,
+      "Params": {
+        "prompt": "tactical blade icon, steampunk",
+        "negative_prompt": "text, watermark",
+        "width": 512,
+        "height": 512,
+        "seed": 1682489570
+      }
+    },
+    {
+      "Filename": "4097645260.png",
+      "Seed": 4097645260,
+      "Params": {
+        "prompt": "tactical blade icon, steampunk",
+        "negative_prompt": "text, watermark",
+        "width": 512,
+        "height": 512,
+        "seed": 4097645260
+      }
+    }
+  ],
+  "Errors": []
+}
