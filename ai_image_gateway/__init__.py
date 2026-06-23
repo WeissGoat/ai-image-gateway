@@ -20,9 +20,18 @@ from .schema import (
     GenerateRequest,
     ImageFormat,
     ImageResult,
+    ImageToImageRequest,
     InpaintRequest,
 )
 from .service import ImageService
+from .image_inputs import (
+    ImageInputError,
+    ResolvedImageInput,
+    detect_image_mime_type,
+    image_bytes_to_data_url,
+    resolve_image_input,
+    resolve_image_inputs,
+)
 from .errors import (
     GatewayError,
     ConfigError,
@@ -38,11 +47,18 @@ __all__ = [
     "ImageService",
     # Schema
     "GenerateRequest",
+    "ImageToImageRequest",
     "InpaintRequest",
     "ImageResult",
     "BatchResult",
     "Capability",
     "ImageFormat",
+    "ImageInputError",
+    "ResolvedImageInput",
+    "detect_image_mime_type",
+    "image_bytes_to_data_url",
+    "resolve_image_input",
+    "resolve_image_inputs",
     # Errors
     "GatewayError",
     "ConfigError",

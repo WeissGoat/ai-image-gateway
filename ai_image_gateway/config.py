@@ -39,6 +39,7 @@ class DefaultProviderConfig(BaseModel):
     """各能力的默认 provider 路由。"""
 
     generate: str = "mock"
+    image_to_image: str = "mock"
     inpaint: str = "mock"
     upscale: str = "mock"
 

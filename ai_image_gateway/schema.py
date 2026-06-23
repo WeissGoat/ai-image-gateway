@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 class Capability(str, Enum):
     """Provider 支持的能力枚举。"""
     GENERATE = "generate"
+    IMAGE_TO_IMAGE = "image_to_image"
     INPAINT = "inpaint"
     UPSCALE = "upscale"
 
@@ -50,6 +51,25 @@ class GenerateRequest(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict, description="Provider 特有参数透传")
 
 
+class ImageToImageRequest(BaseModel):
+    """参考图 / 图生图请求。"""
+
+    images: list[bytes] = Field(
+        min_length=1,
+        max_length=16,
+        description="参考图二进制数据列表",
+    )
+    prompt: str
+    negative_prompt: str = ""
+    width: int | None = None
+    height: int | None = None
+    count: int = Field(default=1, ge=1, le=16, description="单次生成候选张数")
+    seed: int | None = Field(default=None, description="随机种子, None=随机")
+    provider: str | None = None
+    output_format: ImageFormat = ImageFormat.PNG
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
 class InpaintRequest(BaseModel):
     """图片局部重绘/修复请求。"""
 
@@ -59,6 +79,8 @@ class InpaintRequest(BaseModel):
     negative_prompt: str = ""
     width: int | None = None
     height: int | None = None
+    count: int = Field(default=1, ge=1, le=16, description="单次生成候选张数")
+    seed: int | None = Field(default=None, description="随机种子, None=随机")
     provider: str | None = None
     output_format: ImageFormat = ImageFormat.PNG
     extra: dict[str, Any] = Field(default_factory=dict)

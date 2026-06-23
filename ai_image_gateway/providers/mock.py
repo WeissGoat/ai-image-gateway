@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 from ..schema import (
     Capability,
     GenerateRequest,
+    ImageToImageRequest,
     ImageResult,
     InpaintRequest,
 )
@@ -54,7 +55,11 @@ class MockProvider(BaseImageProvider):
     # ------------------------------------------------------------------
 
     def supports(self, capability: Capability) -> bool:
-        return capability in (Capability.GENERATE, Capability.INPAINT)
+        return capability in (
+            Capability.GENERATE,
+            Capability.IMAGE_TO_IMAGE,
+            Capability.INPAINT,
+        )
 
     # ------------------------------------------------------------------
     # 核心操作
@@ -91,25 +96,66 @@ class MockProvider(BaseImageProvider):
             ))
         return results
 
+    async def image_to_image(self, request: ImageToImageRequest) -> list[ImageResult]:
+        logger.info("[MockProvider] image_to_image: prompt='{}'", request.prompt[:60])
+        width = request.width or 512
+        height = request.height or 512
+        results: list[ImageResult] = []
+        for i in range(request.count):
+            seed = request.seed + i if request.seed is not None else random.randint(0, 2**32 - 1)
+            img_bytes = self._render_placeholder(
+                width=width,
+                height=height,
+                seed=seed,
+                label=f"[IMAGE_TO_IMAGE] {request.prompt[:60]}",
+            )
+            results.append(ImageResult(
+                image_bytes=img_bytes,
+                seed=seed,
+                provider_name=self.name,
+                model_name="mock-v1",
+                generation_params={
+                    "prompt": request.prompt,
+                    "negative_prompt": request.negative_prompt,
+                    "width": width,
+                    "height": height,
+                    "seed": seed,
+                    "mode": "image_to_image",
+                    "reference_image_count": len(request.images),
+                },
+                cost=0.0,
+            ))
+        return results
+
     async def inpaint(self, request: InpaintRequest) -> list[ImageResult]:
         logger.info("[MockProvider] inpaint: prompt='{}'", request.prompt[:60])
         width = request.width or 512
         height = request.height or 512
-        seed = random.randint(0, 2**32 - 1)
-        img_bytes = self._render_placeholder(
-            width=width,
-            height=height,
-            seed=seed,
-            label=f"[INPAINT] {request.prompt[:60]}",
-        )
-        return [ImageResult(
-            image_bytes=img_bytes,
-            seed=seed,
-            provider_name=self.name,
-            model_name="mock-v1",
-            generation_params={"prompt": request.prompt, "mode": "inpaint"},
-            cost=0.0,
-        )]
+        results: list[ImageResult] = []
+        for i in range(request.count):
+            seed = request.seed + i if request.seed is not None else random.randint(0, 2**32 - 1)
+            img_bytes = self._render_placeholder(
+                width=width,
+                height=height,
+                seed=seed,
+                label=f"[INPAINT] {request.prompt[:60]}",
+            )
+            results.append(ImageResult(
+                image_bytes=img_bytes,
+                seed=seed,
+                provider_name=self.name,
+                model_name="mock-v1",
+                generation_params={
+                    "prompt": request.prompt,
+                    "negative_prompt": request.negative_prompt,
+                    "width": width,
+                    "height": height,
+                    "seed": seed,
+                    "mode": "inpaint",
+                },
+                cost=0.0,
+            ))
+        return results
 
     # ------------------------------------------------------------------
     # 内部渲染

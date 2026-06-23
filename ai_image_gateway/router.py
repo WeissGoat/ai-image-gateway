@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 _PROVIDER_REGISTRY: dict[str, type[BaseImageProvider] | str] = {
     "mock": MockProvider,
     "novelai": "ai_image_gateway.providers.novelai:NovelAIProvider",
+    "openai_images": "ai_image_gateway.providers.openai_compatible:OpenAIImagesProvider",
+    "openai_chat_image": "ai_image_gateway.providers.openai_compatible:OpenAIChatImageProvider",
+    "gemini_chat_image": "ai_image_gateway.providers.openai_compatible:GeminiChatImageProvider",
+    "grok_chat_image": "ai_image_gateway.providers.openai_compatible:GrokChatImageProvider",
 }
 
 
@@ -116,6 +120,7 @@ class ProviderRouter:
         defaults = self._config.default_provider
         mapping = {
             Capability.GENERATE: defaults.generate,
+            Capability.IMAGE_TO_IMAGE: defaults.image_to_image,
             Capability.INPAINT: defaults.inpaint,
             Capability.UPSCALE: defaults.upscale,
         }

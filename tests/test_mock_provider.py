@@ -6,7 +6,7 @@ import io
 
 from ai_image_gateway import ImageService, GenerateRequest
 from ai_image_gateway.config import GatewayConfig
-from ai_image_gateway.schema import InpaintRequest
+from ai_image_gateway.schema import ImageToImageRequest, InpaintRequest
 
 
 def _make_default_service() -> ImageService:
@@ -86,9 +86,31 @@ class TestMockProviderInpaint:
                 prompt="fix this area",
                 width=256,
                 height=256,
+                count=2,
+                seed=7,
             ))
-            assert result.success_count == 1
+            assert result.success_count == 2
             assert result.results[0].provider_name == "mock"
+            assert [r.seed for r in result.results] == [7, 8]
+
+
+class TestMockProviderImageToImage:
+    @pytest.mark.asyncio
+    async def test_image_to_image(self):
+        async with _make_default_service() as svc:
+            result = await svc.image_to_image(ImageToImageRequest(
+                images=[b"fake_image"],
+                prompt="redraw this image",
+                width=256,
+                height=256,
+                count=2,
+                seed=17,
+            ))
+            assert result.success_count == 2
+            assert result.results[0].provider_name == "mock"
+            assert [r.seed for r in result.results] == [17, 18]
+            assert result.results[0].generation_params["mode"] == "image_to_image"
+            assert result.results[0].generation_params["reference_image_count"] == 1
 
 
 class TestBatchGenerate:
@@ -100,6 +122,40 @@ class TestBatchGenerate:
                 for i in range(3)
             ]
             results = await svc.batch_generate(
+                requests, delay_seconds=0.0
+            )
+            assert len(results) == 3
+            for r in results:
+                assert r.success_count == 1
+                assert len(r.errors) == 0
+
+
+class TestBatchInpaint:
+    @pytest.mark.asyncio
+    async def test_batch_multiple_requests(self):
+        async with _make_default_service() as svc:
+            requests = [
+                InpaintRequest(image=b"image", mask=b"mask", prompt=f"fix_{i}", count=1)
+                for i in range(3)
+            ]
+            results = await svc.batch_inpaint(
+                requests, delay_seconds=0.0
+            )
+            assert len(results) == 3
+            for r in results:
+                assert r.success_count == 1
+                assert len(r.errors) == 0
+
+
+class TestBatchImageToImage:
+    @pytest.mark.asyncio
+    async def test_batch_multiple_requests(self):
+        async with _make_default_service() as svc:
+            requests = [
+                ImageToImageRequest(images=[b"image"], prompt=f"redraw_{i}", count=1)
+                for i in range(3)
+            ]
+            results = await svc.batch_image_to_image(
                 requests, delay_seconds=0.0
             )
             assert len(results) == 3

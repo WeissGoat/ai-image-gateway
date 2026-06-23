@@ -20,6 +20,7 @@ from .schema import (
     BatchResult,
     Capability,
     GenerateRequest,
+    ImageToImageRequest,
     ImageResult,
     InpaintRequest,
 )
@@ -90,6 +91,24 @@ class ImageService:
             batch.errors.append(f"Unexpected: {e}")
         return batch
 
+    async def image_to_image(self, request: ImageToImageRequest) -> BatchResult:
+        """参考图 / 图生图。"""
+        batch = BatchResult()
+        try:
+            provider = await self._router.get_provider(
+                requested_name=request.provider,
+                capability=Capability.IMAGE_TO_IMAGE,
+            )
+            results = await provider.image_to_image(request)
+            batch.results.extend(results)
+        except GatewayError as e:
+            logger.error("Image-to-image failed: {}", e)
+            batch.errors.append(str(e))
+        except Exception as e:
+            logger.exception("Unexpected error during image_to_image")
+            batch.errors.append(f"Unexpected: {e}")
+        return batch
+
     async def batch_generate(
         self,
         requests: list[GenerateRequest],
@@ -134,6 +153,82 @@ class ImageService:
                 )
         else:
             # 有限并发
+            tasks = [_process(i, req) for i, req in enumerate(requests)]
+            results = await asyncio.gather(*tasks)
+
+        return results
+
+    async def batch_inpaint(
+        self,
+        requests: list[InpaintRequest],
+        *,
+        concurrency: int = 1,
+        delay_seconds: float = 2.0,
+        on_progress: Callable[[int, int, BatchResult], Any] | None = None,
+    ) -> list[BatchResult]:
+        """
+        批量局部重绘/修复。
+        Defaults to serial execution because most image providers rate-limit
+        inpaint endpoints aggressively.
+        """
+        results: list[BatchResult] = []
+        total = len(requests)
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _process(index: int, req: InpaintRequest) -> BatchResult:
+            async with semaphore:
+                if index > 0 and delay_seconds > 0:
+                    await asyncio.sleep(delay_seconds)
+                batch = await self.inpaint(req)
+                if on_progress:
+                    on_progress(index + 1, total, batch)
+                return batch
+
+        if concurrency <= 1:
+            for i, req in enumerate(requests):
+                batch = await _process(i, req)
+                results.append(batch)
+                logger.info(
+                    "Inpaint batch progress: {}/{}, success={}, errors={}",
+                    i + 1, total, batch.success_count, len(batch.errors),
+                )
+        else:
+            tasks = [_process(i, req) for i, req in enumerate(requests)]
+            results = await asyncio.gather(*tasks)
+
+        return results
+
+    async def batch_image_to_image(
+        self,
+        requests: list[ImageToImageRequest],
+        *,
+        concurrency: int = 1,
+        delay_seconds: float = 2.0,
+        on_progress: Callable[[int, int, BatchResult], Any] | None = None,
+    ) -> list[BatchResult]:
+        """批量参考图 / 图生图。"""
+        results: list[BatchResult] = []
+        total = len(requests)
+        semaphore = asyncio.Semaphore(concurrency)
+
+        async def _process(index: int, req: ImageToImageRequest) -> BatchResult:
+            async with semaphore:
+                if index > 0 and delay_seconds > 0:
+                    await asyncio.sleep(delay_seconds)
+                batch = await self.image_to_image(req)
+                if on_progress:
+                    on_progress(index + 1, total, batch)
+                return batch
+
+        if concurrency <= 1:
+            for i, req in enumerate(requests):
+                batch = await _process(i, req)
+                results.append(batch)
+                logger.info(
+                    "Image-to-image batch progress: {}/{}, success={}, errors={}",
+                    i + 1, total, batch.success_count, len(batch.errors),
+                )
+        else:
             tasks = [_process(i, req) for i, req in enumerate(requests)]
             results = await asyncio.gather(*tasks)
 

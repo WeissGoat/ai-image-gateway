@@ -7,6 +7,7 @@ from ai_image_gateway.schema import (
     GenerateRequest,
     ImageFormat,
     ImageResult,
+    ImageToImageRequest,
     InpaintRequest,
 )
 
@@ -61,6 +62,82 @@ class TestImageResult:
         assert result.cost == 0.5
 
 
+class TestImageToImageRequest:
+    def test_defaults(self):
+        req = ImageToImageRequest(
+            images=[b"image"],
+            prompt="redraw",
+        )
+        assert req.count == 1
+        assert req.seed is None
+        assert req.width is None
+        assert req.height is None
+        assert req.provider is None
+        assert req.output_format == ImageFormat.PNG
+        assert req.extra == {}
+
+    def test_custom_values(self):
+        req = ImageToImageRequest(
+            images=[b"image_a", b"image_b"],
+            prompt="redraw",
+            negative_prompt="blur",
+            width=768,
+            height=1024,
+            count=3,
+            seed=123,
+            provider="openai_images",
+            extra={"quality": "high"},
+        )
+        assert len(req.images) == 2
+        assert req.negative_prompt == "blur"
+        assert req.width == 768
+        assert req.height == 1024
+        assert req.count == 3
+        assert req.seed == 123
+        assert req.provider == "openai_images"
+        assert req.extra["quality"] == "high"
+
+    def test_image_list_and_count_validation(self):
+        with pytest.raises(Exception):
+            ImageToImageRequest(images=[], prompt="redraw")
+        with pytest.raises(Exception):
+            ImageToImageRequest(images=[b"x"] * 17, prompt="redraw")
+        with pytest.raises(Exception):
+            ImageToImageRequest(images=[b"image"], prompt="redraw", count=0)
+        with pytest.raises(Exception):
+            ImageToImageRequest(images=[b"image"], prompt="redraw", count=20)
+
+
+class TestInpaintRequest:
+    def test_defaults(self):
+        req = InpaintRequest(
+            image=b"image",
+            mask=b"mask",
+            prompt="repair",
+        )
+        assert req.count == 1
+        assert req.seed is None
+        assert req.width is None
+        assert req.height is None
+
+    def test_custom_seed_and_count(self):
+        req = InpaintRequest(
+            image=b"image",
+            mask=b"mask",
+            prompt="repair",
+            count=4,
+            seed=123,
+        )
+        assert req.count == 4
+        assert req.seed == 123
+
+    def test_count_validation(self):
+        with pytest.raises(Exception):
+            InpaintRequest(image=b"image", mask=b"mask", prompt="repair", count=0)
+        with pytest.raises(Exception):
+            InpaintRequest(image=b"image", mask=b"mask", prompt="repair", count=20)
+
+
 class TestBatchResult:
     def test_total_cost(self):
         batch = BatchResult(
@@ -82,5 +159,6 @@ class TestBatchResult:
 class TestCapability:
     def test_enum_values(self):
         assert Capability.GENERATE == "generate"
+        assert Capability.IMAGE_TO_IMAGE == "image_to_image"
         assert Capability.INPAINT == "inpaint"
         assert Capability.UPSCALE == "upscale"

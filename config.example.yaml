@@ -4,7 +4,8 @@
 
 default_provider:
   generate: mock          # 可改为 novelai
-  inpaint: mock
+  image_to_image: mock    # 可改为 openai_images / openai_chat_image / gemini_chat_image / grok_chat_image
+  inpaint: mock           # 可改为 novelai
   upscale: mock
 
 providers:
@@ -17,8 +18,9 @@ providers:
   novelai:
     enabled: true        # 启用时改为 true
     auth:
-      # 三选一 (优先级从高到低):
-      # access_token: ${NAI_ACCESS_TOKEN}   # 直接提供 JWT token
+      # 凭证优先级:
+      # access_token: ${NAI_ACCESS_TOKEN}   # 直接提供 token；未设置时可走本机 client.py fallback
+      # client_py_path: F:\my_project\new\tags_machine\novelai\client.py
       # access_key: ${NAI_ACCESS_KEY}       # access_key, 自动 login
       username: ${NAI_USERNAME}             # 账号密码, 自动 hash + login
       password: ${NAI_PASSWORD}
@@ -45,6 +47,51 @@ providers:
   #   settings:
   #     model: imagen-4.0-generate-001
   #     safety_filter: block_none
+
+  # OpenAI-compatible Images API endpoint:
+  # - generate: /v1/images/generations
+  # - image_to_image: /v1/images/edits reference image edit
+  # This is not the local masked inpaint capability.
+  openai_images:
+    enabled: false
+    auth:
+      api_key: ${AI_IMAGE_PROXY_KEY}
+    settings:
+      base_url: https://proxy.example.com/v1
+      endpoint: /images/generations
+      edit_endpoint: /images/edits
+      model: gpt-image-2
+      response_format: b64_json
+      size: 1024x1024
+      quality: high
+      output_format: png
+      timeout: 120
+      retry: 2
+
+  # OpenAI-compatible chat endpoint, for image models proxied through /v1/chat/completions.
+  gemini_chat_image:
+    enabled: false
+    auth:
+      api_key: ${AI_IMAGE_PROXY_KEY}
+    settings:
+      base_url: https://proxy.example.com/v1
+      endpoint: /chat/completions
+      model: gemini-3.1-flash-image
+      temperature: 0.2
+      timeout: 120
+      retry: 2
+
+  grok_chat_image:
+    enabled: false
+    auth:
+      api_key: ${AI_IMAGE_PROXY_KEY}
+    settings:
+      base_url: https://proxy.example.com/v1
+      endpoint: /chat/completions
+      model: grok-imagine-image-lite
+      temperature: 0.2
+      timeout: 120
+      retry: 2
 
 logging:
   level: INFO

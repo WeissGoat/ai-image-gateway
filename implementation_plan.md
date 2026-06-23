@@ -289,7 +289,7 @@ async with ImageService("config.yaml") as svc:
 ### P3 批量脚本对接（后续）
 
 ```python
-# 美术工具/Batch-GenerateArt.py
+# tools/美术工具/Batch-GenerateArt.py
 from ai_image_service import ImageService, GenerateRequest
 import json
 

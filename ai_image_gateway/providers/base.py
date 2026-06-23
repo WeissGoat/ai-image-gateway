@@ -10,7 +10,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-from ..schema import Capability, GenerateRequest, InpaintRequest, ImageResult
+from ..errors import ProviderCapabilityError
+from ..schema import Capability, GenerateRequest, ImageToImageRequest, InpaintRequest, ImageResult
 
 if TYPE_CHECKING:
     from ..config import ProviderConfig
@@ -61,6 +62,13 @@ class BaseImageProvider(ABC):
         返回 list[ImageResult]，长度应等于 request.count。
         单张失败不应中断整批，而应在返回的 list 中减少数量并由 Service 层记录 error。
         """
+
+    async def image_to_image(self, request: ImageToImageRequest) -> list[ImageResult]:
+        """
+        参考图 / 图生图。
+        不支持时抛出 ProviderCapabilityError。
+        """
+        raise ProviderCapabilityError(self.name, Capability.IMAGE_TO_IMAGE.value)
 
     @abstractmethod
     async def inpaint(self, request: InpaintRequest) -> list[ImageResult]:

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 from ai_image_gateway import ImageService, GenerateRequest
+from ai_image_gateway.auth import resolve_novelai_access_token
 from ai_image_gateway.config import (
     GatewayConfig,
     DefaultProviderConfig,
@@ -14,6 +15,12 @@ OUTPUT_DIR = Path(__file__).parent / "output"
 
 
 async def main():
+    access_token = resolve_novelai_access_token()
+    if not access_token:
+        raise SystemExit(
+            "Set NAI_ACCESS_TOKEN or point NAI_CLIENT_PY to a local NovelAI client.py."
+        )
+
     OUTPUT_DIR.mkdir(exist_ok=True)
 
     config = GatewayConfig(
@@ -22,7 +29,7 @@ async def main():
             "novelai": ProviderConfig(
                 enabled=True,
                 auth={
-                    "access_token": "pst-2ZWgAWqeSRU6aAQ0YtwECMoQ1aV2x7S6Yo3U8Tcpet3LLooyXTskoaXgKz4Jn2Vg",
+                    "access_token": access_token,
                 },
                 settings={
                     "model": "nai-diffusion-4-5-full",
@@ -43,7 +50,7 @@ async def main():
 
         print("\n[2/3] Generating single image...")
         result = await svc.generate(GenerateRequest(
-            prompt="game item icon, rusty dagger, steampunk, worn metal blade, transparent background, best quality, amazing quality, very aesthetic, absurdres",
+            prompt="game item icon, subterranean fantasy dagger, clean anime 2D game art, transparent background, best quality, amazing quality, very aesthetic, absurdres",
             negative_prompt="lowres, text, watermark, signature",
             width=832,
             height=1216,

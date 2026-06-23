@@ -18,11 +18,16 @@ class TestLoadConfig:
         cfg = load_config(None)
         assert isinstance(cfg, GatewayConfig)
         assert cfg.default_provider.generate == "mock"
+        assert cfg.default_provider.image_to_image == "mock"
 
     def test_load_from_yaml(self, tmp_path):
         """从 YAML 文件加载。"""
         cfg_data = {
-            "default_provider": {"generate": "novelai", "inpaint": "gemini"},
+            "default_provider": {
+                "generate": "novelai",
+                "image_to_image": "openai_images",
+                "inpaint": "gemini",
+            },
             "providers": {
                 "novelai": {
                     "enabled": True,
@@ -36,6 +41,7 @@ class TestLoadConfig:
 
         cfg = load_config(cfg_path)
         assert cfg.default_provider.generate == "novelai"
+        assert cfg.default_provider.image_to_image == "openai_images"
         assert cfg.providers["novelai"].auth["username"] == "test@example.com"
         assert cfg.providers["novelai"].settings["use_nai4"] is True
 
