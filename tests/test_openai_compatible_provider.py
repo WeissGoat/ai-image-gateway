@@ -176,6 +176,29 @@ class TestOpenAIImagesProvider:
         files = post.call_args.kwargs["files"]
         assert [field for field, _ in files] == ["image"]
 
+    @pytest.mark.asyncio
+    async def test_images_provider_surfaces_provider_error_payload(self):
+        provider = OpenAIImagesProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={
+                "base_url": "https://proxy.example.com/v1",
+                "model": "gpt-image-2",
+            },
+        ))
+        await provider.initialize()
+
+        response = _mock_response({
+            "error": {
+                "message": "openai_error",
+                "type": "bad_response_status_code",
+                "code": "bad_response_status_code",
+            },
+        })
+
+        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=response):
+            with pytest.raises(ProviderError, match="openai_error"):
+                await provider.generate(GenerateRequest(prompt="icon"))
+
 
 class TestOpenAIChatImageProvider:
     @pytest.mark.asyncio

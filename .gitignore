@@ -1,4 +1,6 @@
 *.pyc
 *.png
 *.req
+config.local.yaml
+examples/output/
 misc/

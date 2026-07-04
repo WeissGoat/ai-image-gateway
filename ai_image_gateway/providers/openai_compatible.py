@@ -344,6 +344,22 @@ class _OpenAICompatibleBase(BaseImageProvider):
             raise ProviderError(self.name, "No image data found in provider response")
         return results
 
+    def _extract_provider_error_message(self, response: dict[str, Any]) -> str | None:
+        error = response.get("error")
+        if isinstance(error, dict):
+            message = error.get("message")
+            if message:
+                return str(message)
+            code = error.get("code")
+            if code:
+                return str(code)
+        if isinstance(error, str) and error:
+            return error
+        message = response.get("message")
+        if isinstance(message, str) and message:
+            return message
+        return None
+
     def _extract_image_items(self, response: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         data = response.get("data")
@@ -605,13 +621,9 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
 
     def _extract_provider_error_message(self, response: dict[str, Any]) -> str | None:
         for payload in self._chat_payloads(response):
-            error = payload.get("error")
-            if isinstance(error, dict):
-                message = error.get("message")
-                if message:
-                    return str(message)
-            elif isinstance(error, str) and error:
-                return error
+            message = super()._extract_provider_error_message(payload)
+            if message:
+                return message
         return None
 
     def _chat_payloads(self, response: dict[str, Any]) -> list[dict[str, Any]]:
