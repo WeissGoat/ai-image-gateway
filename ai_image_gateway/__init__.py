@@ -27,7 +27,7 @@ from .contracts import (
     NovelAIRawResult,
     RetryRecord,
 )
-from .service import ImageService
+from .service import BatchService, ImageService
 from .image_inputs import (
     ImageInputError,
     ResolvedImageInput,
@@ -48,6 +48,7 @@ from .router import register_provider
 
 __all__ = [
     # Service
+    "BatchService",
     "ImageService",
     # Schema
     "GenerateRequest",
