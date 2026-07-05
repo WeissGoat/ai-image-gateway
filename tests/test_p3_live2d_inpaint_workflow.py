@@ -9,9 +9,11 @@ from ai_image_gateway.config import DefaultProviderConfig, GatewayConfig
 from ai_image_gateway.workflows.p3_live2d_inpaint import run_p3_live2d_inpaint
 
 
-def test_workflow_only_uses_facade_imports():
+def test_workflow_imports_image_service_from_facade_layer():
     source = Path("ai_image_gateway/workflows/p3_live2d_inpaint.py").read_text(encoding="utf-8")
+    assert "from ai_image_gateway.facade.image_service import ImageService" in source
     assert "from ai_image_gateway.providers." not in source
+    assert "from ..service import ImageService" not in source
 
 
 def _write_png(path: Path, size=(128, 192), color=(80, 120, 160, 255)) -> None:

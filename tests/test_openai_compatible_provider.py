@@ -20,12 +20,14 @@ from ai_image_gateway.providers.openai_compatible import (
 from ai_image_gateway.schema import Capability, GenerateRequest, ImageToImageRequest
 
 
-def test_provider_subpackages_export_existing_classes():
-    from ai_image_gateway.providers.mock.provider import MockProvider
-    from ai_image_gateway.providers.openai_compatible.facade import OpenAIImagesProvider
+def test_provider_packages_are_the_only_homes_for_exports():
+    from ai_image_gateway.providers.mock import MockProvider
+    from ai_image_gateway.providers.openai_compatible import OpenAIImagesProvider as PackagedOpenAIImagesProvider
 
     assert MockProvider is not None
-    assert OpenAIImagesProvider is not None
+    assert PackagedOpenAIImagesProvider is OpenAIImagesProvider
+    assert not Path("ai_image_gateway/providers/mock.py").exists()
+    assert not Path("ai_image_gateway/providers/openai_compatible.py").exists()
 
 
 def _png_b64(width: int = 16, height: int = 12) -> str:
