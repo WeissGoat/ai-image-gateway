@@ -9,6 +9,11 @@ from ai_image_gateway.config import DefaultProviderConfig, GatewayConfig
 from ai_image_gateway.workflows.p3_live2d_inpaint import run_p3_live2d_inpaint
 
 
+def test_workflow_only_uses_facade_imports():
+    source = Path("ai_image_gateway/workflows/p3_live2d_inpaint.py").read_text(encoding="utf-8")
+    assert "from ai_image_gateway.providers." not in source
+
+
 def _write_png(path: Path, size=(128, 192), color=(80, 120, 160, 255)) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     img = Image.new("RGBA", size, color)

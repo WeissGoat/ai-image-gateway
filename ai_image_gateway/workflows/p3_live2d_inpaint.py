@@ -19,9 +19,9 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 from PIL import Image, ImageChops, ImageFilter
 
-from ..config import GatewayConfig
-from ..schema import InpaintRequest
-from ..service import ImageService
+from ai_image_gateway.config import GatewayConfig
+from ai_image_gateway.facade.image_service import ImageService
+from ai_image_gateway.schema import InpaintRequest
 
 
 def _utc_now_iso() -> str:

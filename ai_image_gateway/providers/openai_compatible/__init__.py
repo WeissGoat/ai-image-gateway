@@ -1,6 +1,4 @@
-"""Compatibility shim for the OpenAI-compatible provider package."""
-
-from .openai_compatible import (
+from .facade import (
     GeminiChatImageProvider,
     GrokChatImageProvider,
     OpenAIChatImageProvider,

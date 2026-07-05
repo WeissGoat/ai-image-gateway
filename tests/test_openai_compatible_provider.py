@@ -3,6 +3,7 @@
 import base64
 import io
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +18,14 @@ from ai_image_gateway.providers.openai_compatible import (
     OpenAIImagesProvider,
 )
 from ai_image_gateway.schema import Capability, GenerateRequest, ImageToImageRequest
+
+
+def test_provider_subpackages_export_existing_classes():
+    from ai_image_gateway.providers.mock.provider import MockProvider
+    from ai_image_gateway.providers.openai_compatible.facade import OpenAIImagesProvider
+
+    assert MockProvider is not None
+    assert OpenAIImagesProvider is not None
 
 
 def _png_b64(width: int = 16, height: int = 12) -> str:
