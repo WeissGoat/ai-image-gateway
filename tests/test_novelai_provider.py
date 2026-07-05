@@ -20,7 +20,10 @@ from ai_image_gateway.providers.novelai import (
     _novelai_inpaint_model,
     _prepare_inpaint_source_image,
 )
+from ai_image_gateway.providers.novelai.facade import NovelAIFacadeProvider
+from ai_image_gateway.providers.novelai.raw_client import NovelAIRawClient
 from ai_image_gateway.schema import Capability, GenerateRequest, InpaintRequest
+from ai_image_gateway.schema import NovelAIRawPayload
 from ai_image_gateway.errors import ProviderError
 
 
@@ -65,6 +68,22 @@ def _make_provider(access_token: str = "test_token_123") -> NovelAIProvider:
     return NovelAIProvider(config)
 
 
+def _make_raw_client(access_token: str = "test_token_123") -> NovelAIRawClient:
+    config = ProviderConfig(
+        enabled=True,
+        auth={"access_token": access_token},
+        settings={
+            "model": "nai-diffusion-4-5-full",
+            "sampler": "k_euler",
+            "steps": 28,
+            "cfg": 5.0,
+            "timeout": 30,
+            "retry": 1,
+        },
+    )
+    return NovelAIRawClient(config)
+
+
 def _multipart_request_json(call) -> dict:
     files = call.kwargs["files"]
     for field_name, file_tuple in files:
@@ -79,6 +98,11 @@ def _multipart_png(call, field: str) -> Image.Image:
         if field_name == field:
             return Image.open(io.BytesIO(file_tuple[1]))
     raise AssertionError(f"multipart {field} part not found")
+
+
+def test_novelai_split_modules_exist():
+    assert NovelAIRawClient is not None
+    assert NovelAIFacadeProvider is not None
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +322,120 @@ class TestGenerate:
         assert payload["parameters"]["sampler"] == "k_euler"
 
         await provider.close()
+
+
+class TestNovelAIRawTransport:
+    @pytest.mark.asyncio
+    async def test_generate_raw_sends_payload_without_rebuilding_params(self):
+        client = _make_raw_client()
+        await client.initialize()
+
+        payload = NovelAIRawPayload(
+            input="raw prompt",
+            model="nai-diffusion-4-5-full",
+            action="generate",
+            parameters={
+                "params_version": 3,
+                "width": 832,
+                "height": 1216,
+                "seed": 123,
+                "n_samples": 1,
+                "characterPrompts": [{"prompt": "akemi_homura", "uc": ""}],
+                "reference_image_multiple": [],
+            },
+        )
+        fake_zip = _make_fake_zip_png(832, 1216)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = fake_zip
+        mock_response.headers = {"content-type": "application/zip"}
+
+        with patch.object(client._provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            result = await client.generate_raw(payload)
+
+        sent_payload = mock_post.call_args.kwargs["json"]
+        assert mock_post.call_args.args[0] == "https://image.novelai.net/ai/generate-image"
+        assert sent_payload == payload.model_dump()
+        assert sent_payload["parameters"]["characterPrompts"] == [
+            {"prompt": "akemi_homura", "uc": ""}
+        ]
+        assert sent_payload["parameters"]["reference_image_multiple"] == []
+        assert len(result.images) == 1
+        assert result.images[0].filename == "image_0.png"
+        assert result.request_payload == payload
+        assert result.retry_records[0].status_code == 200
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_generate_raw_uses_configured_base_url(self):
+        client = NovelAIRawClient(ProviderConfig(
+            enabled=True,
+            auth={"access_token": "test_token_123"},
+            settings={
+                "base_url": "http://novelai.local",
+                "retry": 1,
+            },
+        ))
+        await client.initialize()
+
+        payload = NovelAIRawPayload(
+            input="raw prompt",
+            model="nai-diffusion-4-5-full",
+            action="generate",
+            parameters={"seed": 123},
+        )
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = _make_fake_zip_png()
+        mock_response.headers = {}
+
+        with patch.object(client._provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            await client.generate_raw(payload)
+
+        assert mock_post.call_args.args[0] == "http://novelai.local/ai/generate-image"
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_generate_raw_retries_retryable_status(self, monkeypatch):
+        client = _make_raw_client()
+        client._provider._retry = 2
+        await client.initialize()
+
+        payload = NovelAIRawPayload(
+            input="raw prompt",
+            model="nai-diffusion-4-5-full",
+            action="generate",
+            parameters={"seed": 123, "width": 1024, "height": 1024},
+        )
+        first_response = MagicMock()
+        first_response.status_code = 502
+        first_response.text = "bad gateway"
+        first_response.headers = {}
+        second_response = MagicMock()
+        second_response.status_code = 200
+        second_response.content = _make_fake_zip_png()
+        second_response.headers = {}
+        sleep = AsyncMock()
+        monkeypatch.setattr("asyncio.sleep", sleep)
+
+        with patch.object(
+            client._provider._client,
+            "post",
+            new_callable=AsyncMock,
+            side_effect=[first_response, second_response],
+        ) as mock_post:
+            result = await client.generate_raw(payload)
+
+        assert mock_post.call_count == 2
+        assert mock_post.call_args_list[0].kwargs["json"] == payload.model_dump()
+        assert mock_post.call_args_list[1].kwargs["json"] == payload.model_dump()
+        assert [record.status_code for record in result.retry_records] == [502, 200]
+        assert result.retry_records[0].retryable is True
+        sleep.assert_awaited_once_with(2.0)
+
+        await client.close()
 
 
 class TestInpaint:
