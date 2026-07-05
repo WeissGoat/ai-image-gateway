@@ -14,7 +14,7 @@ Usage::
         ))
 """
 
-from .schema import (
+from .contracts import (
     BatchResult,
     Capability,
     GenerateRequest,
@@ -22,6 +22,10 @@ from .schema import (
     ImageResult,
     ImageToImageRequest,
     InpaintRequest,
+    NovelAIRawImage,
+    NovelAIRawPayload,
+    NovelAIRawResult,
+    RetryRecord,
 )
 from .service import ImageService
 from .image_inputs import (
@@ -51,6 +55,10 @@ __all__ = [
     "InpaintRequest",
     "ImageResult",
     "BatchResult",
+    "NovelAIRawPayload",
+    "NovelAIRawResult",
+    "NovelAIRawImage",
+    "RetryRecord",
     "Capability",
     "ImageFormat",
     "ImageInputError",
