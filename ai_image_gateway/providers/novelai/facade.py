@@ -22,7 +22,7 @@ from .payloads import (
     _resize_image,
     build_params,
 )
-from .raw_client import _NovelAITransportProvider
+from .raw_client import NovelAIRawClient
 
 
 class NovelAIFacadeProvider(BaseImageProvider):
@@ -30,11 +30,12 @@ class NovelAIFacadeProvider(BaseImageProvider):
 
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
-        self._transport = _NovelAITransportProvider(config)
+        self._raw_client = NovelAIRawClient(config)
         self._defaults = NovelAIDefaults.from_settings(config.settings)
         self._access_token = ""
         self._client = None
-        self._base_url: str = self._transport._base_url
+        transport = self._raw_client._provider
+        self._base_url: str = transport._base_url
         self._model: str = self._defaults.model
         self._sampler: str = self._defaults.sampler
         self._scheduler: str = self._defaults.scheduler
@@ -47,19 +48,20 @@ class NovelAIFacadeProvider(BaseImageProvider):
         self._variety: bool = self._defaults.variety
         self._decrisper: bool = self._defaults.decrisper
         self._limit_opus_free: bool = self._defaults.limit_opus_free
-        self._timeout: int = self._transport._timeout
-        self._retry: int = self._transport._retry
-        self._retry_interval: float | None = self._transport._retry_interval
+        self._timeout: int = transport._timeout
+        self._retry: int = transport._retry
+        self._retry_interval: float | None = transport._retry_interval
 
     async def initialize(self) -> None:
-        await self._transport.initialize()
-        self._access_token = self._transport._access_token
-        self._client = self._transport._client
+        await self._raw_client.initialize()
+        transport = self._raw_client._provider
+        self._access_token = transport._access_token
+        self._client = transport._client
         logger.info("[NovelAI] Initialized, model={}", self._model)
 
     async def close(self) -> None:
-        await self._transport.close()
-        self._client = self._transport._client
+        await self._raw_client.close()
+        self._client = self._raw_client._provider._client
         logger.info("[NovelAI] Closed")
 
     def supports(self, capability: Capability) -> bool:
@@ -112,7 +114,7 @@ class NovelAIFacadeProvider(BaseImageProvider):
             )
 
             try:
-                raw = await self._transport.generate_raw(payload)
+                raw = await self._raw_client.generate_raw(payload)
                 results.append(
                     ImageResult(
                         image_bytes=first_image_bytes(raw, provider_name=self.name),
@@ -217,7 +219,7 @@ class NovelAIFacadeProvider(BaseImageProvider):
             )
             img_png_bytes = _pil_to_png_bytes(img_resized)
             mask_png_bytes = _pil_to_png_bytes(_mask_b64_to_pil(mask_b64))
-            raw = await self._transport.generate_multipart(
+            raw = await self._raw_client.generate_multipart(
                 payload,
                 image_bytes=img_png_bytes,
                 mask_bytes=mask_png_bytes,

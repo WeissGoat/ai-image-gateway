@@ -84,3 +84,24 @@ Observed result:
 ## Commit
 
 Created after verification as requested.
+
+---
+
+## Review fix follow-up (2026-07-06 01:34:04 +08:00)
+
+### Findings addressed
+
+- Important: `ai_image_gateway/providers/novelai/facade.py` now delegates through the public `NovelAIRawClient` for both raw JSON and multipart image requests, preserving the intended facade -> raw client -> transport layering.
+- Minor: `tests/test_novelai_provider.py` now imports `NovelAIRawPayload` from the canonical module `ai_image_gateway.contracts.raw`.
+
+### Focused verification
+
+Command:
+
+```bash
+uv run python -m pytest tests/test_novelai_provider.py -v
+```
+
+Observed result:
+
+- `24 passed`

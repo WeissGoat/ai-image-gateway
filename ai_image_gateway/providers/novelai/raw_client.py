@@ -249,3 +249,16 @@ class NovelAIRawClient:
 
     async def generate_raw(self, payload: NovelAIRawPayload) -> NovelAIRawResult:
         return await self._provider.generate_raw(payload)
+
+    async def generate_multipart(
+        self,
+        payload: NovelAIRawPayload,
+        *,
+        image_bytes: bytes,
+        mask_bytes: bytes,
+    ) -> NovelAIRawResult:
+        return await self._provider.generate_multipart(
+            payload,
+            image_bytes=image_bytes,
+            mask_bytes=mask_bytes,
+        )

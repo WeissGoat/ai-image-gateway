@@ -23,7 +23,7 @@ from ai_image_gateway.providers.novelai import (
 from ai_image_gateway.providers.novelai.facade import NovelAIFacadeProvider
 from ai_image_gateway.providers.novelai.raw_client import NovelAIRawClient
 from ai_image_gateway.schema import Capability, GenerateRequest, InpaintRequest
-from ai_image_gateway.schema import NovelAIRawPayload
+from ai_image_gateway.contracts.raw import NovelAIRawPayload
 from ai_image_gateway.errors import ProviderError
 
 
