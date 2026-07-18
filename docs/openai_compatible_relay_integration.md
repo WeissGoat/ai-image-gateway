@@ -1,7 +1,7 @@
 ---
 title: OpenAI-Compatible Relay Image Integration
 status: active
-last_verified: 2026-06-23
+last_verified: 2026-07-18
 ---
 
 # OpenAI-Compatible Relay Image Integration
@@ -151,8 +151,9 @@ Chat image providers intentionally use conservative payloads:
   `/v1/chat/completions`.
 - Do not send `n` by default.
 - Allow explicit `n` only when the caller passes it through `extra`.
-- Keep `model`, `messages`, `stream: false`, and safe passthrough fields such
-  as `temperature`.
+- Keep `model`, `messages`, and safe passthrough fields such as `temperature`.
+- Streaming is disabled by default. `settings.stream: true` enables it, while
+  request `extra["stream"]` has final precedence and can enable or disable it.
 
 This avoids relay bans or request rejection caused by using Images API fields on
 chat-completions-only image models.
@@ -171,6 +172,55 @@ Chat image responses are parsed from several common proxy formats:
 
 If an SSE response contains a provider error message, the gateway surfaces that
 message instead of returning a generic "No image data found" error.
+
+## Transparent Streaming Transport
+
+When the final chat payload contains `stream: true`, the gateway opens the
+request with `httpx.AsyncClient.stream()` and incrementally decodes SSE through
+`httpx-sse`. This changes only the provider's internal transport: callers still
+await `ImageService.generate()` or `ImageService.image_to_image()` and receive
+the existing `BatchResult` / `ImageResult` models.
+
+Transport rules:
+
+- `text/event-stream` is decoded incrementally, including multiline `data:`
+  fields and `[DONE]`.
+- A clean EOF after valid events is accepted even when a relay omits `[DONE]`.
+- Ordinary JSON returned to a stream request is read from the same connection.
+- SSE comment heartbeats are consumed by `httpx-sse` to maintain the
+  connection, but its public API does not expose a comment heartbeat count.
+- A stream failure never triggers an automatic buffered re-submit, avoiding
+  duplicate generation and duplicate billing.
+- HTTP error excerpts are bounded and secrets, prompts, Base64 payloads, and
+  data URLs are not added to transport evidence.
+
+Successful stream requests add these fields to `generation_params`:
+
+```text
+stream_requested
+stream_response_mode
+stream_event_count
+stream_first_event_elapsed_s
+stream_completed_by_done
+```
+
+Focused real-service smoke:
+
+```powershell
+python examples/smoke_streaming_chat_image.py `
+  --config config.local.yaml `
+  --provider gemini_chat_image `
+  --mode image_to_image `
+  --prompt "Keep the second image composition and replace only its character using the first reference image." `
+  --image "C:\path\to\character-reference.png" `
+  --image "C:\path\to\extracted-frame.png" `
+  --width 320 `
+  --height 180
+```
+
+The smoke rejects GIF inputs; callers must pass an extracted still frame. Its
+temporary output contains the decoded image plus a `summary.json` with elapsed
+time and the non-sensitive stream fields above.
 
 ## Reference Image Inputs
 
@@ -207,6 +257,17 @@ Known-bad or not-yet-default routes:
 - `openai_images.image_to_image()` with `/v1/images/edits` on the current relay.
 - `grok_chat_image.image_to_image()` with reference images on the current relay.
 
+Transparent streaming verification on 2026-07-18:
+
+- Gemini text-to-image succeeded through true SSE streaming in 109.672 seconds.
+  The first business event arrived at 0.0 seconds, five events were collected,
+  `[DONE]` was received, and the 113,200-byte JPEG decoded successfully.
+- Gemini two-reference image-to-image kept the stream connection alive beyond
+  the previous 524 window, but the upstream peer closed an incomplete chunked
+  response after 292.906 seconds. No decodable image was returned. This is
+  `validation_limited:stream_request_failed_before_success_evidence`; it does
+  not prove the image-to-image route is end-to-end stable yet.
+
 Recommended default for this relay:
 
 ```yaml
@@ -224,8 +285,10 @@ explicitly or use a separate config profile.
 
 Fresh verification performed for this integration:
 
+- `python -m pytest tests/test_sse_transport.py tests/test_openai_compatible_provider.py tests/test_streaming_smoke_cli.py -q`
 - `python -m pytest tests/test_openai_compatible_provider.py tests/test_image_inputs.py -q`
 - `python -m pytest tests -q`
+- `python -m compileall -q ai_image_gateway examples/smoke_streaming_chat_image.py`
 - project docs validation from the P3 root
 
 The relay smoke tests used environment-provided credentials only. No generated

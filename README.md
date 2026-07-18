@@ -95,6 +95,7 @@ providers:
     settings:
       base_url: https://proxy.example.com/v1
       model: gemini-3.1-flash-image
+      stream: true
 ```
 
 Chat image responses are parsed from common proxy formats: JSON
@@ -105,6 +106,36 @@ Chat image providers intentionally keep payloads conservative: they do not send
 Images API string `response_format` values such as `b64_json`, and they do not
 send `n` unless it is explicitly provided through `extra`. Some OpenAI-compatible
 image relays reject those fields on `/v1/chat/completions`.
+
+When the final chat payload contains `stream: true`, the provider uses
+`httpx.AsyncClient.stream()` plus `httpx-sse` to consume SSE events
+incrementally. A relay that returns ordinary JSON despite the stream request is
+parsed from the same response connection; the gateway does not submit a second
+buffered request. SSE comment heartbeats keep the connection active but are not
+exposed as a public count by `httpx-sse`.
+
+Streaming remains disabled unless provider settings or request `extra` enable
+it. Request `extra={"stream": false}` overrides a provider default. Successful
+stream requests add only bounded transport evidence to `generation_params`:
+
+- `stream_requested`
+- `stream_response_mode`
+- `stream_event_count`
+- `stream_first_event_elapsed_s`
+- `stream_completed_by_done`
+
+Use the focused smoke command to save one decoded image and a secret-safe
+`summary.json` in the system temporary directory:
+
+```powershell
+python examples/smoke_streaming_chat_image.py `
+  --config config.local.yaml `
+  --provider gemini_chat_image `
+  --mode generate `
+  --prompt "Generate one tiny blue crystal dot on a white background. No text." `
+  --width 64 `
+  --height 64
+```
 
 ## Reference Image Inputs
 
