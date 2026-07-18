@@ -69,6 +69,23 @@ async def test_streaming_sse_accepts_clean_eof_without_done():
 
 
 @pytest.mark.asyncio
+async def test_streaming_sse_ignores_comment_heartbeat():
+    payload = {"choices": [{"delta": {"content": "https://example.com/a.png"}}]}
+    body = b": keep-alive\n\n" + f"data: {json.dumps(payload)}\n\n".encode()
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": "text/event-stream"},
+        stream=ChunkStream([body]),
+    )
+    try:
+        result = await read_streaming_response(response)
+    finally:
+        await response.aclose()
+    assert result.payload == {"_sse_events": [payload]}
+    assert result.event_count == 1
+
+
+@pytest.mark.asyncio
 async def test_streaming_response_falls_back_to_json_on_same_connection():
     payload = {"data": [{"url": "https://example.com/a.png"}]}
     response = httpx.Response(

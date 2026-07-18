@@ -296,6 +296,51 @@ class TestOpenAIChatImageProvider:
         assert post.await_count == 1
 
     @pytest.mark.asyncio
+    async def test_chat_image_to_image_streams_sse_and_records_transport_evidence(self):
+        requests: list[dict] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(json.loads(request.content))
+            event = {
+                "choices": [{
+                    "delta": {
+                        "content": f"data:image/png;base64,{_png_b64(18, 14)}",
+                    },
+                }],
+            }
+            body = f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n".encode()
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                stream=StreamingBytes([body]),
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={"model": "gemini-3.1-flash-image"},
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            results = await provider.image_to_image(ImageToImageRequest(
+                images=[_png_bytes()],
+                prompt="replace character",
+                extra={"stream": True},
+            ))
+        finally:
+            await provider.close()
+
+        assert requests[0]["stream"] is True
+        assert isinstance(requests[0]["messages"][-1]["content"], list)
+        assert len(results) == 1
+        assert Image.open(io.BytesIO(results[0].image_bytes)).size == (18, 14)
+        assert results[0].generation_params["mode"] == "image_to_image"
+        assert results[0].generation_params["stream_response_mode"] == "sse"
+        assert results[0].generation_params["stream_completed_by_done"] is True
+
+    @pytest.mark.asyncio
     async def test_chat_stream_true_accepts_plain_json_without_second_request(self):
         calls = 0
 
