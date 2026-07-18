@@ -259,9 +259,10 @@ Known-bad or not-yet-default routes:
 
 Transparent streaming verification on 2026-07-18:
 
-- Gemini text-to-image succeeded through true SSE streaming in 109.672 seconds.
-  The first business event arrived at 0.0 seconds, five events were collected,
-  `[DONE]` was received, and the 113,200-byte JPEG decoded successfully.
+- Gemini text-to-image succeeded through true SSE streaming in 49.859 seconds.
+  Measured from immediately before the HTTP request, the first business event
+  arrived at 0.312 seconds; five events were collected, `[DONE]` was received,
+  and the 107,560-byte JPEG decoded successfully.
 - Gemini two-reference image-to-image kept the stream connection alive beyond
   the previous 524 window, but the upstream peer closed an incomplete chunked
   response after 292.906 seconds. No decodable image was returned. This is
