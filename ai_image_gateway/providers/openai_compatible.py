@@ -11,6 +11,7 @@ import base64
 import binascii
 import json
 import re
+from time import monotonic
 from typing import Any
 
 import httpx
@@ -191,6 +192,7 @@ class _OpenAICompatibleBase(BaseImageProvider):
         for attempt in range(self._retry + 1):
             try:
                 if payload.get("stream") is True:
+                    stream_started_at = monotonic()
                     async with self._client.stream(
                         "POST",
                         url,
@@ -206,7 +208,10 @@ class _OpenAICompatibleBase(BaseImageProvider):
                                 self.name,
                                 f"HTTP {response.status_code}: {excerpt}",
                             )
-                        result = await read_streaming_response(response)
+                        result = await read_streaming_response(
+                            response,
+                            started_at=stream_started_at,
+                        )
                         response_payload = dict(result.payload)
                         response_payload[_TRANSPORT_META_KEY] = result.generation_params()
                         return response_payload

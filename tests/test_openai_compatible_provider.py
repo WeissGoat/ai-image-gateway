@@ -1,6 +1,7 @@
 """OpenAI-compatible image provider tests."""
 
 import base64
+import asyncio
 import io
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -228,6 +229,7 @@ class TestOpenAIChatImageProvider:
 
         async def handler(request: httpx.Request) -> httpx.Response:
             requests.append(json.loads(request.content))
+            await asyncio.sleep(0.03)
             event = {
                 "choices": [{
                     "delta": {
@@ -264,6 +266,7 @@ class TestOpenAIChatImageProvider:
         assert results[0].generation_params["stream_requested"] is True
         assert results[0].generation_params["stream_response_mode"] == "sse"
         assert results[0].generation_params["stream_event_count"] == 1
+        assert results[0].generation_params["stream_first_event_elapsed_s"] >= 0.02
         assert results[0].generation_params["stream_completed_by_done"] is True
 
     @pytest.mark.asyncio

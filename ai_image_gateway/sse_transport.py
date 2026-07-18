@@ -50,8 +50,12 @@ async def read_response_excerpt(response: httpx.Response, *, limit: int = 4096) 
     return bytes(collected).decode("utf-8", errors="replace")
 
 
-async def read_streaming_response(response: httpx.Response) -> StreamReadResult:
-    started_at = monotonic()
+async def read_streaming_response(
+    response: httpx.Response,
+    *,
+    started_at: float | None = None,
+) -> StreamReadResult:
+    request_started_at = monotonic() if started_at is None else started_at
     if not is_sse_response(response):
         body = await response.aread()
         try:
@@ -76,7 +80,7 @@ async def read_streaming_response(response: httpx.Response) -> StreamReadResult:
             completed_by_done = True
             break
         if first_event_elapsed_s is None:
-            first_event_elapsed_s = round(monotonic() - started_at, 3)
+            first_event_elapsed_s = round(monotonic() - request_started_at, 3)
         try:
             payload = json.loads(data)
         except json.JSONDecodeError as exc:
