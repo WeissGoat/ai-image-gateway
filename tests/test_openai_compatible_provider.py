@@ -5,6 +5,7 @@ import io
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 from PIL import Image
 
@@ -46,6 +47,19 @@ def _mock_response(
     response.text = text if text is not None else str(payload)
     response.headers = headers or {}
     return response
+
+
+class StreamingBytes(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+
+    async def __aiter__(self):
+        for chunk in self._chunks:
+            yield chunk
+
+
+def _streaming_transport(handler):
+    return httpx.MockTransport(handler)
 
 
 class TestOpenAIImagesProvider:
@@ -201,6 +215,114 @@ class TestOpenAIImagesProvider:
 
 
 class TestOpenAIChatImageProvider:
+    @pytest.mark.asyncio
+    async def test_chat_generate_streams_sse_and_records_transport_evidence(self):
+        requests: list[dict] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(json.loads(request.content))
+            event = {
+                "choices": [{
+                    "delta": {
+                        "content": f"![image](data:image/png;base64,{_png_b64()})",
+                    },
+                }],
+            }
+            body = f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n".encode()
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                stream=StreamingBytes([body]),
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={
+                "base_url": "https://proxy.example.com/v1",
+                "model": "gemini-3.1-flash-image",
+                "stream": True,
+            },
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            results = await provider.generate(GenerateRequest(prompt="stream icon"))
+        finally:
+            await provider.close()
+
+        assert requests[0]["stream"] is True
+        assert len(results) == 1
+        assert results[0].generation_params["stream_requested"] is True
+        assert results[0].generation_params["stream_response_mode"] == "sse"
+        assert results[0].generation_params["stream_event_count"] == 1
+        assert results[0].generation_params["stream_completed_by_done"] is True
+
+    @pytest.mark.asyncio
+    async def test_chat_i2i_request_extra_disables_provider_stream_default(self):
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={
+                "base_url": "https://proxy.example.com/v1",
+                "model": "model",
+                "stream": True,
+            },
+        ))
+        await provider.initialize()
+        response = _mock_response({"data": [{"b64_json": _png_b64()}]})
+        try:
+            with patch.object(
+                provider._client,
+                "post",
+                new_callable=AsyncMock,
+                return_value=response,
+            ) as post:
+                results = await provider.image_to_image(ImageToImageRequest(
+                    images=[_png_bytes()],
+                    prompt="edit",
+                    extra={"stream": False},
+                ))
+        finally:
+            await provider.close()
+        assert len(results) == 1
+        assert post.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_chat_stream_true_accepts_plain_json_without_second_request(self):
+        calls = 0
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "application/json"},
+                json={"data": [{"b64_json": _png_b64()}]},
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={
+                "base_url": "https://proxy.example.com/v1",
+                "model": "gemini-3.1-flash-image",
+                "stream": True,
+            },
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            results = await provider.generate(GenerateRequest(prompt="stream icon"))
+        finally:
+            await provider.close()
+
+        assert calls == 1
+        assert len(results) == 1
+        assert results[0].generation_params["stream_requested"] is True
+        assert results[0].generation_params["stream_response_mode"] == "json"
+
     @pytest.mark.asyncio
     async def test_generate_posts_chat_payload_and_decodes_data_url(self):
         provider = OpenAIChatImageProvider(ProviderConfig(

@@ -24,6 +24,7 @@ from ..image_inputs import (
     image_bytes_to_data_url,
 )
 from ..schema import Capability, GenerateRequest, ImageResult, ImageToImageRequest, InpaintRequest
+from ..sse_transport import read_response_excerpt, read_streaming_response
 from .base import BaseImageProvider
 
 
@@ -33,6 +34,12 @@ _MARKDOWN_IMAGE_RE = re.compile(
 )
 _HTTP_IMAGE_URL_RE = re.compile(r"https?://[^\s<>'\")]+")
 _BASE64_PAYLOAD_RE = re.compile(r"^[A-Za-z0-9+/=\s]{64,}$")
+_TRANSPORT_META_KEY = "_ai_image_gateway_transport"
+
+
+def _pop_transport_meta(response: dict[str, Any]) -> dict[str, Any]:
+    value = response.pop(_TRANSPORT_META_KEY, None)
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _join_url(base_url: str, endpoint: str) -> str:
@@ -183,6 +190,27 @@ class _OpenAICompatibleBase(BaseImageProvider):
         last_error: Exception | None = None
         for attempt in range(self._retry + 1):
             try:
+                if payload.get("stream") is True:
+                    async with self._client.stream(
+                        "POST",
+                        url,
+                        json=payload,
+                        headers=headers,
+                    ) as response:
+                        if response.status_code == 429:
+                            retry_after = float(response.headers.get("Retry-After", "5"))
+                            raise RateLimitError(self.name, retry_after=retry_after)
+                        if response.status_code >= 400:
+                            excerpt = await read_response_excerpt(response)
+                            raise ProviderError(
+                                self.name,
+                                f"HTTP {response.status_code}: {excerpt}",
+                            )
+                        result = await read_streaming_response(response)
+                        response_payload = dict(result.payload)
+                        response_payload[_TRANSPORT_META_KEY] = result.generation_params()
+                        return response_payload
+
                 response = await self._client.post(url, json=payload, headers=headers)
                 if response.status_code == 429:
                     retry_after = float(response.headers.get("Retry-After", "5"))
@@ -519,6 +547,7 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
         _copy_chat_passthrough_params(payload, settings=settings, extra=request.extra, keys=passthrough_keys)
 
         response = await self._post_json(payload)
+        transport_meta = _pop_transport_meta(response)
         generation_params = {
             "api_surface": "chat/completions",
             "model": model,
@@ -527,6 +556,7 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
             "width": request.width,
             "height": request.height,
             "count": request.count,
+            **transport_meta,
         }
         return await self._extract_image_results(
             response,
@@ -561,6 +591,7 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
         _copy_chat_passthrough_params(payload, settings=settings, extra=request.extra, keys=passthrough_keys)
 
         response = await self._post_json(payload)
+        transport_meta = _pop_transport_meta(response)
         generation_params = {
             "api_surface": "chat/completions",
             "mode": "image_to_image",
@@ -571,6 +602,7 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
             "height": request.height,
             "count": request.count,
             "reference_image_count": len(request.images),
+            **transport_meta,
         }
         return await self._extract_image_results(
             response,
