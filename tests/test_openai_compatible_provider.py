@@ -50,12 +50,19 @@ def _mock_response(
 
 
 class StreamingBytes(httpx.AsyncByteStream):
-    def __init__(self, chunks: list[bytes]) -> None:
+    def __init__(
+        self,
+        chunks: list[bytes],
+        error: Exception | None = None,
+    ) -> None:
         self._chunks = chunks
+        self._error = error
 
     async def __aiter__(self):
         for chunk in self._chunks:
             yield chunk
+        if self._error is not None:
+            raise self._error
 
 
 def _streaming_transport(handler):
@@ -322,6 +329,132 @@ class TestOpenAIChatImageProvider:
         assert len(results) == 1
         assert results[0].generation_params["stream_requested"] is True
         assert results[0].generation_params["stream_response_mode"] == "json"
+
+    @pytest.mark.asyncio
+    async def test_streaming_provider_error_is_preserved(self):
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            event = {"error": {"message": "token pool exhausted"}}
+            body = f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n".encode()
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                stream=StreamingBytes([body]),
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={"model": "model", "retry": 0},
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            with pytest.raises(ProviderError, match="token pool exhausted"):
+                await provider.generate(GenerateRequest(
+                    prompt="icon",
+                    extra={"stream": True},
+                ))
+        finally:
+            await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_streaming_http_error_body_is_bounded(self):
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(524, content=b"x" * 6000)
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={"model": "model", "retry": 0},
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            with pytest.raises(ProviderError) as exc_info:
+                await provider.generate(GenerateRequest(
+                    prompt="icon",
+                    extra={"stream": True},
+                ))
+        finally:
+            await provider.close()
+
+        assert "HTTP 524" in str(exc_info.value)
+        assert len(exc_info.value.detail) < 4300
+
+    @pytest.mark.asyncio
+    async def test_streaming_disconnect_does_not_retry_as_buffered(self):
+        stream_calls = 0
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal stream_calls
+            stream_calls += 1
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                stream=StreamingBytes(
+                    [b'data: {"choices":[]}\n\n'],
+                    error=httpx.ReadError("connection reset"),
+                ),
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={"model": "model", "retry": 0},
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            with patch.object(
+                provider._client,
+                "post",
+                new_callable=AsyncMock,
+            ) as buffered_post:
+                with pytest.raises(ProviderError, match="HTTP transport error"):
+                    await provider.generate(GenerateRequest(
+                        prompt="icon",
+                        extra={"stream": True},
+                    ))
+        finally:
+            await provider.close()
+
+        assert stream_calls == 1
+        assert buffered_post.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_streaming_malformed_sse_is_mapped_to_provider_error_without_retry(self):
+        calls = 0
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                stream=StreamingBytes([b"data: {not-json}\n\n"]),
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={"model": "model", "retry": 2},
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            with pytest.raises(ProviderError, match="Malformed SSE JSON"):
+                await provider.generate(GenerateRequest(
+                    prompt="icon",
+                    extra={"stream": True},
+                ))
+        finally:
+            await provider.close()
+
+        assert calls == 1
 
     @pytest.mark.asyncio
     async def test_generate_posts_chat_payload_and_decodes_data_url(self):

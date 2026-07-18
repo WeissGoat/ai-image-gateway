@@ -24,7 +24,7 @@ from ..image_inputs import (
     image_bytes_to_data_url,
 )
 from ..schema import Capability, GenerateRequest, ImageResult, ImageToImageRequest, InpaintRequest
-from ..sse_transport import read_response_excerpt, read_streaming_response
+from ..sse_transport import SSEPayloadError, read_response_excerpt, read_streaming_response
 from .base import BaseImageProvider
 
 
@@ -229,6 +229,9 @@ class _OpenAICompatibleBase(BaseImageProvider):
                 wait = exc.retry_after or float((attempt + 1) * 5)
                 logger.warning("[{}] Rate limited, waiting {}s", self.name, wait)
                 await asyncio.sleep(wait)
+            except SSEPayloadError as exc:
+                last_error = ProviderError(self.name, str(exc), exc)
+                break
             except httpx.TimeoutException as exc:
                 last_error = ProviderError(self.name, f"Timeout: {exc}", exc)
                 if attempt >= self._retry:
