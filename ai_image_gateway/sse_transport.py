@@ -22,15 +22,19 @@ class StreamReadResult:
     event_count: int
     first_event_elapsed_s: float | None
     completed_by_done: bool
+    transport_error: str | None = None
 
     def generation_params(self) -> dict[str, Any]:
-        return {
+        params = {
             "stream_requested": True,
             "stream_response_mode": self.response_mode,
             "stream_event_count": self.event_count,
             "stream_first_event_elapsed_s": self.first_event_elapsed_s,
             "stream_completed_by_done": self.completed_by_done,
         }
+        if self.transport_error is not None:
+            params["stream_transport_error"] = self.transport_error
+        return params
 
 
 def is_sse_response(response: httpx.Response) -> bool:
@@ -48,6 +52,27 @@ async def read_response_excerpt(response: httpx.Response, *, limit: int = 4096) 
         if len(collected) >= limit:
             break
     return bytes(collected).decode("utf-8", errors="replace")
+
+
+def _contains_image_reference(value: Any, key_hint: str = "") -> bool:
+    if isinstance(value, str):
+        text = value.strip()
+        lowered = text.lower()
+        if "data:image/" in lowered or "![" in text:
+            return True
+        if key_hint in {"b64_json", "base64"} and bool(text):
+            return True
+        if key_hint in {"url", "image_url", "file_uri", "fileUri"}:
+            return lowered.startswith(("http://", "https://", "data:image/"))
+        return False
+    if isinstance(value, list):
+        return any(_contains_image_reference(item, key_hint) for item in value)
+    if isinstance(value, dict):
+        return any(
+            _contains_image_reference(child, str(key))
+            for key, child in value.items()
+        )
+    return False
 
 
 async def read_streaming_response(
@@ -72,23 +97,29 @@ async def read_streaming_response(
     first_event_elapsed_s: float | None = None
     completed_by_done = False
     source = EventSource(response)
-    async for event in source.aiter_sse():
-        data = event.data.strip()
-        if not data:
-            continue
-        if data == "[DONE]":
-            completed_by_done = True
-            break
-        if first_event_elapsed_s is None:
-            first_event_elapsed_s = round(monotonic() - request_started_at, 3)
-        try:
-            payload = json.loads(data)
-        except json.JSONDecodeError as exc:
-            raise SSEPayloadError(f"Malformed SSE JSON: {data[:500]}") from exc
-        if not isinstance(payload, dict):
-            raise SSEPayloadError(f"Expected SSE JSON object: {data[:500]}")
-        events.append(payload)
-        event_count += 1
+    transport_error: str | None = None
+    try:
+        async for event in source.aiter_sse():
+            data = event.data.strip()
+            if not data:
+                continue
+            if data == "[DONE]":
+                completed_by_done = True
+                break
+            if first_event_elapsed_s is None:
+                first_event_elapsed_s = round(monotonic() - request_started_at, 3)
+            try:
+                payload = json.loads(data)
+            except json.JSONDecodeError as exc:
+                raise SSEPayloadError(f"Malformed SSE JSON: {data[:500]}") from exc
+            if not isinstance(payload, dict):
+                raise SSEPayloadError(f"Expected SSE JSON object: {data[:500]}")
+            events.append(payload)
+            event_count += 1
+    except httpx.HTTPError as exc:
+        if not any(_contains_image_reference(event) for event in events):
+            raise
+        transport_error = str(exc)
 
     return StreamReadResult(
         payload={"_sse_events": events},
@@ -96,4 +127,5 @@ async def read_streaming_response(
         event_count=event_count,
         first_event_elapsed_s=first_event_elapsed_s,
         completed_by_done=completed_by_done,
+        transport_error=transport_error,
     )

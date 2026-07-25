@@ -4,8 +4,9 @@ Edit the USER SETTINGS block, then run:
 
     python examples/run_batch_generate.py
 
-This script generates one prompt with multiple candidates. Change COUNT to
-control how many images to generate in one run.
+This script generates one prompt multiple times. Change COUNT to control how
+many images to generate; each provider call requests exactly one image so the
+runner works consistently across Images API and chat image relays.
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ NEGATIVE_PROMPT = ""
 WIDTH = 1024
 HEIGHT = 1024
 COUNT = 3
+DELAY_SECONDS = 2
 
 # Optional seed. Set to None for random.
 SEED: int | None = None
@@ -79,22 +81,12 @@ def _image_extension(image_bytes: bytes) -> str:
 
 
 async def main() -> int:
+    if COUNT < 1:
+        raise SystemExit("COUNT must be at least 1.")
+
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = Path(OUTPUT_ROOT) / f"batch_generate_{run_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    request = GenerateRequest(
-        provider=PROVIDER,
-        prompt=PROMPT,
-        negative_prompt=NEGATIVE_PROMPT,
-        width=WIDTH,
-        height=HEIGHT,
-        count=COUNT,
-        seed=SEED,
-    )
-
-    async with ImageService(CONFIG_PATH) as service:
-        batch = await service.generate(request)
 
     manifest = {
         "run_id": run_id,
@@ -105,35 +97,71 @@ async def main() -> int:
         "width": WIDTH,
         "height": HEIGHT,
         "count": COUNT,
+        "provider_request_count": 1,
+        "delay_seconds": DELAY_SECONDS,
         "seed": SEED,
-        "success_count": batch.success_count,
-        "errors": batch.errors,
+        "success_count": 0,
+        "errors": [],
         "files": [],
+        "runs": [],
     }
 
-    for index, result in enumerate(batch.results):
-        ext = _image_extension(result.image_bytes)
-        image_path = output_dir / f"generated_{index:02d}{ext}"
-        meta_path = output_dir / f"generated_{index:02d}.json"
-        image_path.write_bytes(result.image_bytes)
-        metadata = {
-            "provider": result.provider_name,
-            "model": result.model_name,
-            "seed": result.seed,
-            "generation_params": result.generation_params,
-            "cost": result.cost,
-            "bytes": len(result.image_bytes),
-        }
-        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-        manifest["files"].append({
-            "image": str(image_path),
-            "metadata": str(meta_path),
-        })
+    output_index = 0
+    async with ImageService(CONFIG_PATH) as service:
+        for run_index in range(COUNT):
+            if run_index > 0 and DELAY_SECONDS > 0:
+                await asyncio.sleep(DELAY_SECONDS)
 
-    (output_dir / "manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+            request = GenerateRequest(
+                provider=PROVIDER,
+                prompt=PROMPT,
+                negative_prompt=NEGATIVE_PROMPT,
+                width=WIDTH,
+                height=HEIGHT,
+                count=1,
+                seed=None if SEED is None else SEED + run_index,
+            )
+            batch = await service.generate(request)
+            run_record = {
+                "run_index": run_index,
+                "seed": request.seed,
+                "success_count": batch.success_count,
+                "errors": batch.errors,
+                "files": [],
+            }
+            manifest["success_count"] += batch.success_count
+            manifest["errors"].extend(f"run {run_index}: {error}" for error in batch.errors)
+
+            for result_index, result in enumerate(batch.results):
+                ext = _image_extension(result.image_bytes)
+                image_path = output_dir / f"generated_{output_index:02d}{ext}"
+                meta_path = output_dir / f"generated_{output_index:02d}.json"
+                image_path.write_bytes(result.image_bytes)
+                metadata = {
+                    "run_index": run_index,
+                    "result_index": result_index,
+                    "provider": result.provider_name,
+                    "model": result.model_name,
+                    "seed": result.seed,
+                    "generation_params": result.generation_params,
+                    "cost": result.cost,
+                    "bytes": len(result.image_bytes),
+                }
+                meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+                file_record = {
+                    "image": str(image_path),
+                    "metadata": str(meta_path),
+                }
+                manifest["files"].append(file_record)
+                run_record["files"].append(file_record)
+                output_index += 1
+
+            manifest["runs"].append(run_record)
+            (output_dir / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
     print(str(output_dir))
     return 0
 

@@ -8,6 +8,10 @@ python examples/batch_image_to_image_folder.py ^
   --input-dir F:\path\to\input_images ^
   --out-dir F:\path\to\outputs ^
   --prompt "Turn this into a polished blue crystal game icon, no text."
+
+The --count value is implemented as repeated single-image provider calls. This
+is more portable across OpenAI Images API and chat image relays such as Gemini
+or Grok, where native multi-image count support can differ.
 """
 
 from __future__ import annotations
@@ -65,17 +69,9 @@ async def _process_one(
     width: int | None,
     height: int | None,
     count: int,
+    delay_seconds: float,
 ) -> dict:
     resolved = await resolve_image_input(image_path)
-    batch = await service.image_to_image(ImageToImageRequest(
-        provider=provider,
-        images=[resolved.image_bytes],
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        width=width,
-        height=height,
-        count=count,
-    ))
 
     item_dir = output_dir / _safe_stem(image_path.stem)
     item_dir.mkdir(parents=True, exist_ok=True)
@@ -88,31 +84,64 @@ async def _process_one(
         "width": width,
         "height": height,
         "count": count,
-        "success_count": batch.success_count,
-        "errors": batch.errors,
+        "provider_request_count": 1,
+        "delay_seconds": delay_seconds,
+        "success_count": 0,
+        "errors": [],
         "files": [],
+        "runs": [],
     }
 
-    for index, result in enumerate(batch.results):
-        ext = _image_extension(result.image_bytes)
-        image_out = item_dir / f"{_safe_stem(image_path.stem)}_{index:02d}{ext}"
-        image_out.write_bytes(result.image_bytes)
-        meta_out = item_dir / f"{_safe_stem(image_path.stem)}_{index:02d}.json"
-        metadata = {
-            "source": str(image_path),
-            "image": str(image_out),
-            "provider": result.provider_name,
-            "model": result.model_name,
-            "seed": result.seed,
-            "generation_params": result.generation_params,
-            "cost": result.cost,
-            "bytes": len(result.image_bytes),
+    output_index = 0
+    for run_index in range(count):
+        if run_index > 0 and delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
+
+        batch = await service.image_to_image(ImageToImageRequest(
+            provider=provider,
+            images=[resolved.image_bytes],
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            count=1,
+        ))
+        run_record = {
+            "run_index": run_index,
+            "success_count": batch.success_count,
+            "errors": batch.errors,
+            "files": [],
         }
-        meta_out.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-        record["files"].append({
-            "image": str(image_out),
-            "metadata": str(meta_out),
-        })
+        record["success_count"] += batch.success_count
+        record["errors"].extend(f"run {run_index}: {error}" for error in batch.errors)
+
+        for result_index, result in enumerate(batch.results):
+            ext = _image_extension(result.image_bytes)
+            image_out = item_dir / f"{_safe_stem(image_path.stem)}_{output_index:02d}{ext}"
+            image_out.write_bytes(result.image_bytes)
+            meta_out = item_dir / f"{_safe_stem(image_path.stem)}_{output_index:02d}.json"
+            metadata = {
+                "source": str(image_path),
+                "image": str(image_out),
+                "run_index": run_index,
+                "result_index": result_index,
+                "provider": result.provider_name,
+                "model": result.model_name,
+                "seed": result.seed,
+                "generation_params": result.generation_params,
+                "cost": result.cost,
+                "bytes": len(result.image_bytes),
+            }
+            meta_out.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+            file_record = {
+                "image": str(image_out),
+                "metadata": str(meta_out),
+            }
+            record["files"].append(file_record)
+            run_record["files"].append(file_record)
+            output_index += 1
+
+        record["runs"].append(run_record)
 
     (item_dir / "record.json").write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     return record
@@ -131,7 +160,7 @@ async def main() -> int:
     parser.add_argument("--recursive", action="store_true", help="Scan input folder recursively.")
     parser.add_argument("--width", type=int, default=1024, help="Requested output width.")
     parser.add_argument("--height", type=int, default=1024, help="Requested output height.")
-    parser.add_argument("--count", type=int, default=1, help="Outputs per source image.")
+    parser.add_argument("--count", type=int, default=1, help="Provider calls per source image; one image is requested per call.")
     parser.add_argument("--limit", type=int, help="Process only the first N matched images.")
     parser.add_argument("--delay", type=float, default=2.0, help="Seconds to wait between images.")
     parser.add_argument("--dry-run", action="store_true", help="List inputs and exit without calling providers.")
@@ -142,6 +171,8 @@ async def main() -> int:
         raise SystemExit("Provide --prompt or --prompt-file.")
     if not args.input_dir.exists() or not args.input_dir.is_dir():
         raise SystemExit(f"Input directory not found: {args.input_dir}")
+    if args.count < 1:
+        raise SystemExit("--count must be at least 1.")
 
     patterns = args.pattern or list(DEFAULT_PATTERNS)
     inputs = _collect_inputs(args.input_dir, patterns, args.recursive)
@@ -167,6 +198,7 @@ async def main() -> int:
         "width": args.width,
         "height": args.height,
         "count": args.count,
+        "provider_request_count": 1,
         "inputs": [str(path) for path in inputs],
         "results": [],
     }
@@ -189,6 +221,7 @@ async def main() -> int:
                 width=args.width,
                 height=args.height,
                 count=args.count,
+                delay_seconds=args.delay,
             )
             manifest["results"].append(record)
             (output_dir / "manifest.json").write_text(

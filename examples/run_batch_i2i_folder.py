@@ -52,7 +52,8 @@ PROMPT = """
 """.strip()
 
 
-# Output controls.
+# Output controls. COUNT means provider calls per source image. Each call
+# requests one image for better compatibility with chat image relays.
 WIDTH = 1024
 HEIGHT = 1024
 COUNT = 1

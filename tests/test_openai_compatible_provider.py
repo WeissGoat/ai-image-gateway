@@ -473,6 +473,49 @@ class TestOpenAIChatImageProvider:
         assert buffered_post.await_count == 0
 
     @pytest.mark.asyncio
+    async def test_streaming_disconnect_after_complete_image_event_returns_image(self):
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            event = {
+                "choices": [{
+                    "delta": {
+                        "content": f"data:image/png;base64,{_png_b64()}",
+                    },
+                }],
+            }
+            body = f"data: {json.dumps(event)}\n\n".encode("utf-8")
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                stream=StreamingBytes(
+                    [body],
+                    error=httpx.ReadError("incomplete chunked read"),
+                ),
+            )
+
+        provider = OpenAIChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={"model": "model", "retry": 0},
+        ))
+        await provider.initialize()
+        await provider._client.aclose()
+        provider._client = httpx.AsyncClient(transport=_streaming_transport(handler))
+
+        try:
+            results = await provider.generate(GenerateRequest(
+                prompt="icon",
+                extra={"stream": True},
+            ))
+        finally:
+            await provider.close()
+
+        assert len(results) == 1
+        assert results[0].generation_params["stream_completed_by_done"] is False
+        assert (
+            results[0].generation_params["stream_transport_error"]
+            == "incomplete chunked read"
+        )
+
+    @pytest.mark.asyncio
     async def test_streaming_malformed_sse_is_mapped_to_provider_error_without_retry(self):
         calls = 0
 

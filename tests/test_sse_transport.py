@@ -132,6 +132,31 @@ async def test_streaming_sse_propagates_transport_disconnect():
 
 
 @pytest.mark.asyncio
+async def test_streaming_sse_keeps_complete_image_event_before_transport_disconnect():
+    error = httpx.ReadError("incomplete chunked read")
+    payload = {
+        "choices": [
+            {"delta": {"content": "data:image/png;base64,AAAA"}}
+        ]
+    }
+    body = f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+    response = httpx.Response(
+        200,
+        headers={"Content-Type": "text/event-stream"},
+        stream=ChunkStream([body], error=error),
+    )
+    try:
+        result = await read_streaming_response(response)
+    finally:
+        await response.aclose()
+
+    assert result.payload == {"_sse_events": [payload]}
+    assert result.event_count == 1
+    assert result.completed_by_done is False
+    assert result.transport_error == "incomplete chunked read"
+
+
+@pytest.mark.asyncio
 async def test_response_excerpt_is_bounded():
     response = httpx.Response(524, stream=ChunkStream([b"x" * 6000]))
     try:
