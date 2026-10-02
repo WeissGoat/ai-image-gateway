@@ -4,3 +4,4 @@
 config.local.yaml
 examples/output/
 misc/
+*.egg-info/
