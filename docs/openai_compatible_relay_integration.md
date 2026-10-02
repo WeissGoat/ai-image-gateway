@@ -138,6 +138,26 @@ GPT 图生图默认路由。
 
 参考图会以 OpenAI 风格 chat content part 的 data URL 形式发送。
 
+Gemini adapter 会把请求宽高约分为结构化画幅参数。例如 `1024x1536` 序列化为：
+
+```json
+{
+  "generationConfig": {
+    "responseModalities": ["IMAGE"],
+    "imageConfig": {
+      "aspectRatio": "three-four",
+      "imageSize": "2k"
+    }
+  }
+}
+```
+
+该字段只发送给 `gemini_chat_image`。Gemini 的 Prompt content 不再追加 `Target size`；
+通用 `openai_chat_image` 和 `grok_chat_image` 保持原有 Prompt 尺寸提示兼容行为。
+当前 relay 模型别名只声明 `landscape / portrait / square / four-three / three-four` 和
+`2k / 4k`。网关选择与请求宽高最接近的画幅别名；结构化画幅只约束比例，实际输出
+像素仍需由调用方检查并按资产合同后处理。
+
 ### Grok Image
 
 使用 `grok_chat_image`。
@@ -165,10 +185,21 @@ chat image provider 会刻意保持保守 payload：
 - 默认不发送 `n`。
 - 只有调用方通过 `extra` 显式传入时才发送 `n`。
 - 保留 `model`、`messages` 和安全透传字段，例如 `temperature`。
+- `gemini_chat_image` 额外发送由请求宽高派生的
+  `generationConfig.imageConfig.aspectRatio/imageSize`；这些字段不是通用
+  passthrough，不会发给 OpenAI 或 Grok chat provider。
 - 流式模式默认关闭；`settings.stream: true` 可以启用，请求级 `extra["stream"]`
   拥有最终优先级，可以显式启用或关闭。
 
 这样可以避免把 Images API 字段错发到 chat-completions-only 图片模型上，导致中转拒绝请求或触发风控。
+
+Gemini 请求成功时，实际发送的 provider 专属字段会记录在：
+
+```text
+generation_params.provider_image_parameters
+```
+
+记录只包含非敏感结构化参数，不包含密钥、Prompt、Base64 或 data URL。
 
 ## 响应解析
 

@@ -105,6 +105,29 @@ def _copy_chat_passthrough_params(
         payload[key] = value
 
 
+def _gemini_aspect_ratio(width: int | None, height: int | None) -> str | None:
+    if not width or not height or width <= 0 or height <= 0:
+        return None
+    requested_ratio = width / height
+    supported = (
+        ("landscape", 16 / 9),
+        ("portrait", 9 / 16),
+        ("square", 1.0),
+        ("four-three", 4 / 3),
+        ("three-four", 3 / 4),
+    )
+    return min(supported, key=lambda item: abs(requested_ratio - item[1]))[0]
+
+
+def _gemini_image_size(width: int | None, height: int | None) -> str | None:
+    if not width or not height or width <= 0 or height <= 0:
+        return None
+    long_edge = max(width, height)
+    if long_edge <= 3072:
+        return "2k"
+    return "4k"
+
+
 class _OpenAICompatibleBase(BaseImageProvider):
     """Shared HTTP and parsing utilities for OpenAI-compatible providers."""
 
@@ -489,6 +512,15 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
     def supports(self, capability: Capability) -> bool:
         return capability in (Capability.GENERATE, Capability.IMAGE_TO_IMAGE)
 
+    def _provider_image_parameters(
+        self,
+        request: GenerateRequest | ImageToImageRequest,
+    ) -> dict[str, Any]:
+        return {}
+
+    def _include_target_size_in_prompt(self) -> bool:
+        return True
+
     async def generate(self, request: GenerateRequest) -> list[ImageResult]:
         settings = self._config.settings
         model = str(request.extra.get("model", self._model))
@@ -514,6 +546,8 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
             "user",
         )
         _copy_chat_passthrough_params(payload, settings=settings, extra=request.extra, keys=passthrough_keys)
+        provider_image_parameters = self._provider_image_parameters(request)
+        payload.update(provider_image_parameters)
 
         response = await self._post_json(payload)
         transport_meta = _pop_transport_meta(response)
@@ -525,6 +559,11 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
             "width": request.width,
             "height": request.height,
             "count": request.count,
+            **(
+                {"provider_image_parameters": provider_image_parameters}
+                if provider_image_parameters
+                else {}
+            ),
             **transport_meta,
         }
         return await self._extract_image_results(
@@ -558,6 +597,8 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
             "user",
         )
         _copy_chat_passthrough_params(payload, settings=settings, extra=request.extra, keys=passthrough_keys)
+        provider_image_parameters = self._provider_image_parameters(request)
+        payload.update(provider_image_parameters)
 
         response = await self._post_json(payload)
         transport_meta = _pop_transport_meta(response)
@@ -571,6 +612,11 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
             "height": request.height,
             "count": request.count,
             "reference_image_count": len(request.images),
+            **(
+                {"provider_image_parameters": provider_image_parameters}
+                if provider_image_parameters
+                else {}
+            ),
             **transport_meta,
         }
         return await self._extract_image_results(
@@ -581,10 +627,9 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
         )
 
     def _build_user_content(self, request: GenerateRequest) -> str:
-        parts = [
-            request.prompt,
-            f"Target size: {request.width}x{request.height}.",
-        ]
+        parts = [request.prompt]
+        if self._include_target_size_in_prompt():
+            parts.append(f"Target size: {request.width}x{request.height}.")
         if request.negative_prompt:
             parts.append(f"Negative prompt: {request.negative_prompt}.")
         if request.output_format:
@@ -593,7 +638,7 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
 
     def _build_image_to_image_content(self, request: ImageToImageRequest) -> list[dict[str, Any]]:
         text_parts = [request.prompt]
-        if request.width and request.height:
+        if self._include_target_size_in_prompt() and request.width and request.height:
             text_parts.append(f"Target size: {request.width}x{request.height}.")
         if request.negative_prompt:
             text_parts.append(f"Negative prompt: {request.negative_prompt}.")
@@ -787,9 +832,30 @@ class OpenAIChatImageProvider(_OpenAICompatibleBase):
 
 
 class GeminiChatImageProvider(OpenAIChatImageProvider):
-    """Configured alias for Gemini image models exposed via chat completions."""
+    """Gemini chat image adapter with provider-specific image configuration."""
 
     name = "gemini_chat_image"
+
+    def _include_target_size_in_prompt(self) -> bool:
+        return False
+
+    def _provider_image_parameters(
+        self,
+        request: GenerateRequest | ImageToImageRequest,
+    ) -> dict[str, Any]:
+        aspect_ratio = _gemini_aspect_ratio(request.width, request.height)
+        image_size = _gemini_image_size(request.width, request.height)
+        if aspect_ratio is None or image_size is None:
+            return {}
+        return {
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {
+                    "aspectRatio": aspect_ratio,
+                    "imageSize": image_size,
+                },
+            }
+        }
 
 
 class GrokChatImageProvider(OpenAIChatImageProvider):

@@ -16,6 +16,7 @@ from ai_image_gateway import ImageService
 from ai_image_gateway.config import DefaultProviderConfig, GatewayConfig
 from ai_image_gateway.errors import ProviderError
 from ai_image_gateway.providers.openai_compatible import (
+    GeminiChatImageProvider,
     OpenAIChatImageProvider,
     OpenAIImagesProvider,
 )
@@ -826,6 +827,83 @@ class TestOpenAIChatImageProvider:
         assert provider.supports(Capability.GENERATE)
         assert provider.supports(Capability.IMAGE_TO_IMAGE)
         assert not provider.supports(Capability.INPAINT)
+
+
+class TestGeminiChatImageProvider:
+    @pytest.mark.asyncio
+    async def test_generate_serializes_aspect_ratio_without_prompt_size(self):
+        provider = GeminiChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={
+                "base_url": "https://proxy.example.com/v1",
+                "model": "gemini-3.1-flash-image",
+            },
+        ))
+        await provider.initialize()
+        response = _mock_response({
+            "choices": [{
+                "message": {"content": f"data:image/png;base64,{_png_b64(20, 10)}"}
+            }],
+        })
+
+        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=response) as post:
+            results = await provider.generate(GenerateRequest(
+                prompt="portrait",
+                width=1024,
+                height=1536,
+            ))
+
+        payload = post.call_args.kwargs["json"]
+        assert payload["generationConfig"] == {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {"aspectRatio": "three-four", "imageSize": "2k"},
+        }
+        assert "Target size:" not in payload["messages"][-1]["content"]
+        assert results[0].generation_params["provider_image_parameters"] == {
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {"aspectRatio": "three-four", "imageSize": "2k"},
+            }
+        }
+
+    @pytest.mark.asyncio
+    async def test_image_to_image_serializes_aspect_ratio_and_keeps_reference_content(self):
+        provider = GeminiChatImageProvider(ProviderConfig(
+            auth={"api_key": "test-key"},
+            settings={
+                "base_url": "https://proxy.example.com/v1",
+                "model": "gemini-3.1-flash-image",
+            },
+        ))
+        await provider.initialize()
+        response = _mock_response({
+            "choices": [{
+                "message": {"content": f"data:image/png;base64,{_png_b64(18, 14)}"}
+            }],
+        })
+
+        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=response) as post:
+            results = await provider.image_to_image(ImageToImageRequest(
+                images=[_png_bytes(32, 32)],
+                prompt="injured portrait",
+                width=1024,
+                height=1536,
+            ))
+
+        payload = post.call_args.kwargs["json"]
+        assert payload["generationConfig"] == {
+            "responseModalities": ["IMAGE"],
+            "imageConfig": {"aspectRatio": "three-four", "imageSize": "2k"},
+        }
+        content = payload["messages"][-1]["content"]
+        assert "Target size:" not in content[0]["text"]
+        assert content[1]["type"] == "image_url"
+        assert results[0].generation_params["provider_image_parameters"] == {
+            "generationConfig": {
+                "responseModalities": ["IMAGE"],
+                "imageConfig": {"aspectRatio": "three-four", "imageSize": "2k"},
+            }
+        }
 
 
 class TestOpenAICompatibleRouting:

@@ -96,7 +96,8 @@ ComfyUI 降采样 RGBA mask helper。
 - `openai_images`：`POST /v1/images/generations` 用于文生图，`POST /v1/images/edits`
   用于参考图编辑 / 图生图；适合通过 Images API 暴露的 GPT image 模型。
 - `openai_chat_image`：`POST /v1/chat/completions`，通用 chat image 路由。
-- `gemini_chat_image`：Gemini / Nano Banana 风格模型的 chat image provider 别名。
+- `gemini_chat_image`：Gemini / Nano Banana 风格 chat image provider；请求宽高会
+  映射为 Flow2API 声明的 `generationConfig.imageConfig`，不再依赖 Prompt 尺寸文字。
 - `grok_chat_image`：Grok image 模型的 chat image provider 别名。
 
 provider 不会跨 API surface 自动 fallback。如果某个模型只能用 `chat/completions`，
@@ -146,6 +147,14 @@ chat image provider 会刻意保持保守 payload：不会把 Images API 的字�
 `response_format`，例如 `b64_json`，发送到 `/v1/chat/completions`；也不会默认发送
 `n`。如果确实要发送 `n`，必须由调用方通过 `extra` 显式传入。部分 OpenAI 兼容
 图片中转会拒绝 chat/completions 上的 Images API 字段。
+
+`gemini_chat_image` 是例外的 provider 专属扩展：当请求同时提供正数宽高时，网关
+发送 `generationConfig.imageConfig.aspectRatio` 和 `imageSize`，例如
+`1024x1536 -> three-four + 2k`，并把实际字段记录到
+`generation_params.provider_image_parameters`。这些参数控制画幅与近似输出档位，不
+保证精确像素尺寸；relay 不支持任意 `2:3`，所以正式资产仍应在后处理阶段规范化。
+`openai_chat_image` 和
+`grok_chat_image` 不会收到这些字段。
 
 当最终 chat payload 包含 `stream: true` 时，provider 使用
 `httpx.AsyncClient.stream()` 和 `httpx-sse` 增量消费 SSE 事件。如果中转在
