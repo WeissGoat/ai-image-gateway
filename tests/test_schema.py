@@ -162,3 +162,11 @@ class TestCapability:
         assert Capability.IMAGE_TO_IMAGE == "image_to_image"
         assert Capability.INPAINT == "inpaint"
         assert Capability.UPSCALE == "upscale"
+
+
+def test_schema_keeps_backward_compatible_exports():
+    from ai_image_gateway.schema import GenerateRequest as SchemaGenerateRequest
+    from ai_image_gateway.schema import NovelAIRawPayload as SchemaNovelAIRawPayload
+
+    assert SchemaGenerateRequest(prompt="ok").prompt == "ok"
+    assert SchemaNovelAIRawPayload(input="p", model="m", parameters={}).model == "m"

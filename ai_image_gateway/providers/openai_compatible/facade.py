@@ -7,8 +7,6 @@ project-local relay can be used by changing only configuration.
 
 from __future__ import annotations
 
-import base64
-import binascii
 import json
 import re
 from time import monotonic
@@ -17,16 +15,17 @@ from typing import Any
 import httpx
 from loguru import logger
 
-from ..errors import ProviderCapabilityError, ProviderError, RateLimitError
-from ..image_inputs import (
+from ...errors import ProviderCapabilityError, ProviderError, RateLimitError
+from ...image_inputs import (
     DATA_IMAGE_URL_RE,
     decode_image_data_url,
     detect_image_mime_type,
     image_bytes_to_data_url,
 )
-from ..schema import Capability, GenerateRequest, ImageResult, ImageToImageRequest, InpaintRequest
-from ..sse_transport import SSEPayloadError, read_response_excerpt, read_streaming_response
-from .base import BaseImageProvider
+from ...schema import Capability, GenerateRequest, ImageResult, ImageToImageRequest, InpaintRequest
+from ...sse_transport import SSEPayloadError, read_response_excerpt, read_streaming_response
+from ..base import BaseImageProvider
+from .decode import decode_base64_image, parse_sse_events
 
 
 _DATA_URL_RE = DATA_IMAGE_URL_RE
@@ -45,14 +44,6 @@ def _pop_transport_meta(response: dict[str, Any]) -> dict[str, Any]:
 
 def _join_url(base_url: str, endpoint: str) -> str:
     return f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-
-
-def _decode_base64_image(value: str) -> bytes:
-    cleaned = "".join(value.split())
-    try:
-        return base64.b64decode(cleaned, validate=True)
-    except binascii.Error as exc:
-        raise ValueError("Invalid base64 image data") from exc
 
 
 def _merge_prompt(prompt: str, negative_prompt: str) -> str:
@@ -112,36 +103,6 @@ def _copy_chat_passthrough_params(
             # "b64_json" are deliberately not forwarded to chat image relays.
             continue
         payload[key] = value
-
-
-def _parse_sse_events(response_text: str) -> list[dict[str, Any]]:
-    events: list[dict[str, Any]] = []
-    data_lines: list[str] = []
-
-    def flush_data_lines() -> None:
-        if not data_lines:
-            return
-        data = "\n".join(data_lines).strip()
-        data_lines.clear()
-        if not data or data == "[DONE]":
-            return
-        try:
-            parsed = json.loads(data)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Malformed SSE JSON: {data[:200]}") from exc
-        if isinstance(parsed, dict):
-            events.append(parsed)
-
-    for raw_line in response_text.splitlines():
-        line = raw_line.rstrip("\r")
-        if not line:
-            flush_data_lines()
-            continue
-        if line.startswith("data:"):
-            data_lines.append(line[5:].strip())
-
-    flush_data_lines()
-    return events
 
 
 class _OpenAICompatibleBase(BaseImageProvider):
@@ -309,7 +270,7 @@ class _OpenAICompatibleBase(BaseImageProvider):
                 content_type = ""
             if "text/event-stream" in content_type or text.lstrip().startswith("data:"):
                 try:
-                    return {"_sse_events": _parse_sse_events(text)}
+                    return {"_sse_events": parse_sse_events(text)}
                 except ValueError as exc:
                     raise ProviderError(self.name, str(exc), exc) from exc
             try:
@@ -353,7 +314,7 @@ class _OpenAICompatibleBase(BaseImageProvider):
             if item.get("b64_json") or item.get("base64"):
                 try:
                     raw_base64 = item.get("b64_json") or item.get("base64")
-                    image_bytes = _decode_base64_image(str(raw_base64))
+                    image_bytes = decode_base64_image(str(raw_base64))
                 except ValueError:
                     continue
             elif item.get("url"):

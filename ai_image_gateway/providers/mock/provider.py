@@ -1,10 +1,3 @@
-"""
-MockProvider — 占位图片生成器。
-
-用于架构验证和端到端测试，不调用任何真实 AI 服务。
-生成带有请求参数水印的纯色 PNG 占位图。
-"""
-
 from __future__ import annotations
 
 import io
@@ -14,21 +7,21 @@ from typing import TYPE_CHECKING
 from loguru import logger
 from PIL import Image, ImageDraw, ImageFont
 
-from ..schema import (
+from ...schema import (
     Capability,
     GenerateRequest,
-    ImageToImageRequest,
     ImageResult,
+    ImageToImageRequest,
     InpaintRequest,
 )
-from .base import BaseImageProvider
+from ..base import BaseImageProvider
 
 if TYPE_CHECKING:
-    from ..config import ProviderConfig
+    from ...config import ProviderConfig
 
 
 class MockProvider(BaseImageProvider):
-    """生成占位图的 Mock 适配器。"""
+    """Generate placeholder images for local verification and tests."""
 
     name = "mock"
 
@@ -38,10 +31,6 @@ class MockProvider(BaseImageProvider):
         self._text_color: str = self._config.settings.get("text_color", "#e0c878")
         self._initialized = False
 
-    # ------------------------------------------------------------------
-    # 生命周期
-    # ------------------------------------------------------------------
-
     async def initialize(self) -> None:
         logger.info("[MockProvider] Initialized")
         self._initialized = True
@@ -50,10 +39,6 @@ class MockProvider(BaseImageProvider):
         logger.info("[MockProvider] Closed")
         self._initialized = False
 
-    # ------------------------------------------------------------------
-    # 能力声明
-    # ------------------------------------------------------------------
-
     def supports(self, capability: Capability) -> bool:
         return capability in (
             Capability.GENERATE,
@@ -61,14 +46,12 @@ class MockProvider(BaseImageProvider):
             Capability.INPAINT,
         )
 
-    # ------------------------------------------------------------------
-    # 核心操作
-    # ------------------------------------------------------------------
-
     async def generate(self, request: GenerateRequest) -> list[ImageResult]:
         logger.info(
             "[MockProvider] generate: {}x{} count={} prompt='{}'",
-            request.width, request.height, request.count,
+            request.width,
+            request.height,
+            request.count,
             request.prompt[:60],
         )
         results: list[ImageResult] = []
@@ -157,10 +140,6 @@ class MockProvider(BaseImageProvider):
             ))
         return results
 
-    # ------------------------------------------------------------------
-    # 内部渲染
-    # ------------------------------------------------------------------
-
     def _render_placeholder(
         self,
         width: int,
@@ -168,16 +147,13 @@ class MockProvider(BaseImageProvider):
         seed: int,
         label: str,
     ) -> bytes:
-        """生成带参数水印的占位 PNG。"""
         img = Image.new("RGBA", (width, height), self._bg_color)
         draw = ImageDraw.Draw(img)
 
-        # 对角线交叉标识占位图
         line_color = "#444466"
         draw.line([(0, 0), (width, height)], fill=line_color, width=2)
         draw.line([(width, 0), (0, height)], fill=line_color, width=2)
 
-        # 中心矩形
         margin = min(width, height) // 8
         draw.rectangle(
             [margin, margin, width - margin, height - margin],
@@ -185,7 +161,6 @@ class MockProvider(BaseImageProvider):
             width=2,
         )
 
-        # 文本信息
         try:
             font = ImageFont.truetype("arial.ttf", size=max(12, min(width, height) // 20))
         except OSError:

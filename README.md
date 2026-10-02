@@ -1,7 +1,51 @@
 # AI 图片网关
 
-`ai-image-gateway` 是 Project P3 使用的图片生成、图生图和局部重绘统一入口。
-它把不同后端包装成一致的请求模型，方便美术流水线和批量脚本按 provider 切换。
+`ai-image-gateway` 是图片生成、图生图和局部重绘的 provider 网关 / transport 工具包，
+目前由 Project P3 美术流水线和 PromptAtelier（tags_machine）共用。它把不同后端包装成
+一致的请求模型，并保持两条稳定入口：
+
+- facade 入口：给轻量调用方按 provider 切换后端，例如 P3 美术流水线和批量脚本。
+- raw 入口：给已经自己构造 provider 原生 payload 的调用方，例如 PromptAtelier。
+
+## Facade 入口
+
+稳定的高层入口从包根目录导入：
+
+```python
+from ai_image_gateway import GenerateRequest, ImageService
+```
+
+`ImageService` 是轻量 facade，接收 `GenerateRequest`、`ImageToImageRequest` 和
+`InpaintRequest` 等网关契约。
+
+## Raw 入口
+
+调用方已经持有 provider 原生 payload，只需要网关负责传输、重试和解码、不改写请求
+内容时，使用 raw client：
+
+```python
+from ai_image_gateway.providers.novelai.raw_client import NovelAIRawClient
+from ai_image_gateway.contracts.raw import NovelAIRawPayload
+```
+
+`NovelAIRawClient.generate_raw()` 原样发送 `NovelAIRawPayload`，返回结构化的 raw
+结果和重试记录。
+
+## 公开导入
+
+包根目录的稳定导入包括：
+
+```python
+from ai_image_gateway import (
+    GenerateRequest,
+    ImageService,
+    ImageToImageRequest,
+    InpaintRequest,
+    NovelAIRawPayload,
+    NovelAIRawResult,
+    RetryRecord,
+)
+```
 
 ## NovelAI 鉴权
 
@@ -137,3 +181,14 @@ python examples/smoke_streaming_chat_image.py `
 形式的参考图。面向用户的 runner 可以使用 `resolve_image_input()` /
 `resolve_image_inputs()` 把本地路径、HTTP(S) 图片 URL、原始 bytes 或
 `data:image/...` URL 统一解析成图片 bytes 和 MIME 元数据，再构造请求。
+
+## 架构说明
+
+重构边界、架构规格和实施计划见：
+
+- `docs/2026-07-05-gateway-refactor-boundary.md`
+- `docs/2026-07-06-ai-image-gateway-architecture-refactor-spec.md`
+- `docs/2026-07-06-ai-image-gateway-architecture-refactor-implementation-plan.md`
+
+简单的生成流程走 facade 入口；需要原样保留 provider payload 的集成，例如
+PromptAtelier，走 raw 入口。
