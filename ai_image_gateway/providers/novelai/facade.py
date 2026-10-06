@@ -14,6 +14,7 @@ from .decode import first_image_bytes
 from .payloads import (
     NovelAIDefaults,
     _calculate_resolution,
+    _is_v5_model,
     _mask_b64_to_pil,
     _mask_to_novelai_inpaint_base64,
     _novelai_inpaint_model,
@@ -127,10 +128,10 @@ class NovelAIFacadeProvider(BaseImageProvider):
                             "width": width,
                             "height": height,
                             "seed": seed,
-                            "steps": steps,
-                            "cfg": cfg,
-                            "sampler": sampler,
-                            "scheduler": scheduler,
+                            "steps": params["steps"],
+                            "cfg": params["scale"],
+                            "sampler": params["sampler"],
+                            "scheduler": params["noise_schedule"],
                             "model": model,
                             "action": action,
                         },
@@ -168,11 +169,12 @@ class NovelAIFacadeProvider(BaseImageProvider):
             _resize_image(source_img, (width, height)),
             flatten_alpha=flatten_alpha,
         )
-        is_v4 = "4" in base_model
+        is_v5 = _is_v5_model(base_model)
+        is_v4 = ("4" in base_model) and not is_v5
         mask_b64 = _mask_to_novelai_inpaint_base64(
             request.mask,
             (width, height),
-            is_v4=is_v4,
+            is_v4=(is_v4 or is_v5),
         )
 
         action = "infill"
@@ -208,7 +210,7 @@ class NovelAIFacadeProvider(BaseImageProvider):
             params["extra_noise_seed"] = extra.get("extra_noise_seed", seed)
             params["color_correct"] = extra.get("color_correct", False)
             params["add_original_image"] = extra.get("add_original_image", False)
-            if is_v4:
+            if is_v4 or is_v5:
                 params["inpaintImg2ImgStrength"] = inpaint_i2i_strength
 
             payload = NovelAIRawPayload(

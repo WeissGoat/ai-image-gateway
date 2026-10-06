@@ -11,11 +11,13 @@ from PIL import Image
 
 from ai_image_gateway.config import GatewayConfig, ProviderConfig
 from ai_image_gateway.providers.novelai import (
+    MODELS,
     NovelAIProvider,
     _argon_hash,
     _calculate_resolution,
     _get_access_key,
     _image_to_base64,
+    _is_v5_model,
     _mask_to_novelai_inpaint_base64,
     _novelai_inpaint_model,
     _prepare_inpaint_source_image,
@@ -163,11 +165,29 @@ class TestAuthHelpers:
         assert decoded.getpixel((128, 128))[3] == 255
 
     def test_novelai_inpaint_model_matches_anr_names(self):
+        assert _novelai_inpaint_model("nai-diffusion-5-full") == "nai-diffusion-5-full-inpainting"
+        assert _novelai_inpaint_model("nai-diffusion-5-curated") == "nai-diffusion-5-full-inpainting"
+        assert _novelai_inpaint_model("nai-diffusion-5-full-inpainting") == "nai-diffusion-5-full-inpainting"
         assert _novelai_inpaint_model("nai-diffusion-4-5-full") == "nai-diffusion-4-5-full-inpainting"
         assert _novelai_inpaint_model("nai-diffusion-4-5-curated") == "nai-diffusion-4-5-curated-inpainting"
         assert _novelai_inpaint_model("nai-diffusion-4-curated-preview") == "nai-diffusion-4-curated-inpainting"
         assert _novelai_inpaint_model("nai-diffusion-3") == "nai-diffusion-3-inpainting"
         assert _novelai_inpaint_model("nai-diffusion-2") == "nai-diffusion-2"
+
+    def test_is_v5_model_detection(self):
+        assert _is_v5_model("nai-diffusion-5-full") is True
+        assert _is_v5_model("nai-diffusion-5-curated") is True
+        assert _is_v5_model("nai-diffusion-5-full-inpainting") is True
+        assert _is_v5_model("nai-diffusion-4-5-full") is False
+        assert _is_v5_model("nai-diffusion-4-5-curated") is False
+        assert _is_v5_model("nai-diffusion-4-full") is False
+        assert _is_v5_model("nai-diffusion-3") is False
+        assert _is_v5_model("nai-diffusion-2") is False
+
+    def test_models_list_contains_v5(self):
+        assert "nai-diffusion-5-full" in MODELS
+        assert "nai-diffusion-5-curated" in MODELS
+        assert "nai-diffusion-4-5-full" in MODELS
 
 
 # ---------------------------------------------------------------------------
@@ -320,6 +340,46 @@ class TestGenerate:
         assert payload["model"] == "nai-diffusion-4-5-full"
         assert payload["action"] == "generate"
         assert payload["parameters"]["sampler"] == "k_euler"
+
+        await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_generate_v5_forces_karras_schedule(self):
+        provider = _make_provider()
+        await provider.initialize()
+
+        fake_zip = _make_fake_zip_png()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = fake_zip
+
+        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            results = await provider.generate(GenerateRequest(
+                prompt="masterpiece, 1girl",
+                negative_prompt="low quality",
+                width=832,
+                height=1216,
+                count=1,
+                seed=88,
+                extra={
+                    "model": "nai-diffusion-5-full",
+                    "scheduler": "native",  # Even if native requested, V5 must force karras
+                },
+            ))
+
+        assert len(results) == 1
+        assert results[0].model_name == "nai-diffusion-5-full"
+        assert results[0].generation_params["scheduler"] == "karras"
+
+        call_args = mock_post.call_args
+        payload = call_args.kwargs.get("json") or call_args[1].get("json")
+        assert payload["model"] == "nai-diffusion-5-full"
+        assert payload["parameters"]["noise_schedule"] == "karras"
+        assert payload["parameters"]["ucPresetId"] == "heavy"
+        assert payload["parameters"]["qualityPresetId"] == "standard"
+        assert payload["parameters"]["straight_alpha"] is True
+        assert "ucPreset" not in payload["parameters"]
+        assert "qualityToggle" not in payload["parameters"]
 
         await provider.close()
 
@@ -597,6 +657,45 @@ class TestInpaint:
 
         await provider.close()
 
+    @pytest.mark.asyncio
+    async def test_inpaint_v5_curated_maps_to_v5_full_inpainting(self):
+        provider = _make_provider()
+        await provider.initialize()
+
+        fake_zip = _make_fake_zip_png(512, 512)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = fake_zip
+
+        source = _make_png_bytes(512, 512)
+        mask = _make_png_bytes(512, 512)
+
+        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            results = await provider.inpaint(InpaintRequest(
+                image=source,
+                mask=mask,
+                prompt="repair eye",
+                seed=55,
+                extra={
+                    "model": "nai-diffusion-5-curated",
+                    "inpaint_strength": 0.85,
+                },
+            ))
+
+        payload = _multipart_request_json(mock_post.call_args)
+        assert payload["model"] == "nai-diffusion-5-full-inpainting"
+        assert payload["action"] == "infill"
+        assert payload["parameters"]["noise_schedule"] == "karras"
+        assert payload["parameters"]["inpaintImg2ImgStrength"] == 0.85
+        assert payload["parameters"]["ucPresetId"] == "heavy"
+        assert "ucPreset" not in payload["parameters"]
+
+        assert results[0].model_name == "nai-diffusion-5-full-inpainting"
+        assert results[0].generation_params["base_model"] == "nai-diffusion-5-curated"
+        assert results[0].generation_params["inpaint_i2i_strength"] == 0.85
+
+        await provider.close()
+
 
 class TestBuildParams:
     def test_v4_prompt_structure(self):
@@ -640,3 +739,68 @@ class TestBuildParams:
         )
         assert params["sampler"] == "ddim_v3"
         assert params["sm"] is False
+
+    def test_v5_params_structure(self):
+        provider = _make_provider()
+        params = provider._build_params(
+            width=832, height=1216,
+            positive="test pos", negative="test neg",
+            seed=1, steps=28, cfg=5.0,
+            sampler="k_euler", scheduler="native",
+            smea="none", model="nai-diffusion-5-full",
+            extra={"variety": True},
+        )
+        assert params["params_version"] == 3
+        # V5 forces karras noise schedule
+        assert params["noise_schedule"] == "karras"
+        # V5 string presets
+        assert params["ucPresetId"] == "heavy"
+        assert params["qualityPresetId"] == "standard"
+        assert "ucPreset" not in params
+        assert "qualityToggle" not in params
+        # V5 specific flags
+        assert params["straight_alpha"] is True
+        assert params["normalize_reference_strength_multiple"] is True
+        assert params["inpaintImg2ImgStrength"] == 1.0
+        assert params["legacy_uc"] is False
+        # skip_cfg_above_sigma not set for V5
+        assert "skip_cfg_above_sigma" not in params
+        # prompt structures
+        assert params["v4_prompt"]["caption"]["base_caption"] == "test pos"
+        assert params["v4_negative_prompt"]["caption"]["base_caption"] == "test neg"
+
+    def test_v5_curated_params_structure(self):
+        provider = _make_provider()
+        params = provider._build_params(
+            width=832, height=1216,
+            positive="pos", negative="neg",
+            seed=2, steps=28, cfg=5.0,
+            sampler="k_euler", scheduler="native",
+            smea="none", model="nai-diffusion-5-curated",
+            extra={"ucPresetId": "light", "qualityPresetId": "none"},
+        )
+        assert params["noise_schedule"] == "karras"
+        assert params["ucPresetId"] == "light"
+        assert params["qualityPresetId"] == "none"
+
+    def test_v4_5_regression_protection(self):
+        provider = _make_provider()
+        params = provider._build_params(
+            width=832, height=1216,
+            positive="test pos", negative="test neg",
+            seed=1, steps=28, cfg=5.0,
+            sampler="k_euler", scheduler="native",
+            smea="none", model="nai-diffusion-4-5-full",
+            extra={"variety": True},
+        )
+        assert params["params_version"] == 3
+        # V4.5 retains native scheduler if requested
+        assert params["noise_schedule"] == "native"
+        # V4.5 uses legacy ucPreset int and qualityToggle
+        assert params["ucPreset"] == 3
+        assert params["qualityToggle"] is False
+        assert "ucPresetId" not in params
+        assert "qualityPresetId" not in params
+        assert "straight_alpha" not in params
+        # variety enabled should calculate skip_cfg_above_sigma for V4.5
+        assert "skip_cfg_above_sigma" in params

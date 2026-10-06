@@ -21,6 +21,8 @@ MODELS = [
     "nai-diffusion-4-full",
     "nai-diffusion-4-5-curated",
     "nai-diffusion-4-5-full",
+    "nai-diffusion-5-curated",
+    "nai-diffusion-5-full",
 ]
 
 SAMPLERS = [
@@ -260,11 +262,20 @@ def _mask_to_novelai_inpaint_base64(
     return _image_to_base64(img)
 
 
+def _is_v5_model(model: str) -> bool:
+    m = str(model or "")
+    if "4" in m:
+        return False
+    return m.startswith("nai-diffusion-5") or "diffusion-5" in m or ("5" in m)
+
+
 def _novelai_inpaint_model(model: str) -> str:
     if model.endswith("-inpainting") or "nai-diffusion-2" in model:
         return model
     if model == "nai-diffusion-4-curated-preview":
         return "nai-diffusion-4-curated-inpainting"
+    if _is_v5_model(model):
+        return "nai-diffusion-5-full-inpainting"
     return f"{model}-inpainting"
 
 
@@ -284,9 +295,14 @@ def build_params(
     extra: dict[str, Any],
     defaults: NovelAIDefaults,
 ) -> dict[str, Any]:
-    is_v4_model = "4" in model
+    is_v5 = _is_v5_model(model)
+    is_v4_model = ("4" in model) and not is_v5
+    if is_v5:
+        # V5 强制 karras 调度器，不可使用 native
+        scheduler = "karras"
+
     params: dict[str, Any] = {
-        "params_version": 3 if is_v4_model else 1,
+        "params_version": 3 if (is_v4_model or is_v5) else 1,
         "width": width,
         "height": height,
         "scale": cfg,
@@ -294,8 +310,6 @@ def build_params(
         "steps": steps,
         "seed": seed,
         "n_samples": 1,
-        "ucPreset": defaults.uc_preset,
-        "qualityToggle": False,
         "sm": (smea in ("SMEA", "SMEA+DYN")) and sampler != "ddim",
         "sm_dyn": (smea == "SMEA+DYN") and sampler != "ddim",
         "dynamic_thresholding": defaults.decrisper,
@@ -308,14 +322,16 @@ def build_params(
         "uncond_scale": defaults.uncond_scale,
         "negative_prompt": negative,
         "prompt": positive,
-        "reference_image_multiple": [],
-        "reference_information_extracted_multiple": [],
-        "reference_strength_multiple": [],
-        "characterPrompts": [],
-        "extra_noise_seed": seed,
+        "reference_image_multiple": extra.get("reference_image_multiple", []),
+        "reference_information_extracted_multiple": extra.get(
+            "reference_information_extracted_multiple", []
+        ),
+        "reference_strength_multiple": extra.get("reference_strength_multiple", []),
+        "characterPrompts": extra.get("characterPrompts", []),
+        "extra_noise_seed": extra.get("extra_noise_seed", seed),
         "v4_prompt": {
-            "use_coords": False,
-            "use_order": False,
+            "use_coords": extra.get("use_coords", False) if is_v5 else False,
+            "use_order": extra.get("use_order", False) if is_v5 else False,
             "caption": {"base_caption": positive, "char_captions": []},
         },
         "v4_negative_prompt": {
@@ -324,6 +340,24 @@ def build_params(
             "caption": {"base_caption": negative, "char_captions": []},
         },
     }
+
+    if is_v5:
+        params["ucPresetId"] = extra.get("ucPresetId", "heavy")
+        params["qualityPresetId"] = extra.get("qualityPresetId", "standard")
+        params["straight_alpha"] = extra.get("straight_alpha", True)
+        params["normalize_reference_strength_multiple"] = extra.get(
+            "normalize_reference_strength_multiple", True
+        )
+        params["inpaintImg2ImgStrength"] = extra.get(
+            "inpaintImg2ImgStrength",
+            extra.get("inpaint_i2i_strength", 1.0),
+        )
+        params["legacy_uc"] = extra.get("legacy_uc", False)
+        if "use_coords" in extra:
+            params["use_coords"] = extra["use_coords"]
+    else:
+        params["ucPreset"] = defaults.uc_preset
+        params["qualityToggle"] = False
 
     if sampler == "k_euler_ancestral" and scheduler != "native":
         params["deliberate_euler_ancestral_bug"] = False
@@ -339,7 +373,7 @@ def build_params(
         enabled=defaults.limit_opus_free,
     )
 
-    if defaults.variety or extra.get("variety", False):
+    if not is_v5 and (defaults.variety or extra.get("variety", False)):
         params["skip_cfg_above_sigma"] = _calculate_skip_cfg_above_sigma(
             params["width"], params["height"]
         )
