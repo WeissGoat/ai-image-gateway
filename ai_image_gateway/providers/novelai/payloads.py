@@ -266,7 +266,7 @@ def _is_v5_model(model: str) -> bool:
     m = str(model or "")
     if "4" in m:
         return False
-    return m.startswith("nai-diffusion-5") or "diffusion-5" in m or ("5" in m)
+    return "diffusion-5" in m
 
 
 def _novelai_inpaint_model(model: str) -> str:
