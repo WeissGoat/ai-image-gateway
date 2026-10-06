@@ -209,7 +209,9 @@ class NovelAIFacadeProvider(BaseImageProvider):
             params["noise"] = noise
             params["extra_noise_seed"] = extra.get("extra_noise_seed", seed)
             params["color_correct"] = extra.get("color_correct", False)
-            params["add_original_image"] = extra.get("add_original_image", False)
+            # 默认叠加原图(Overlay Original Image)：蒙版外保持原图逐像素不变，与官网及
+            # Auto-NovelAI-Refactor 的 inpaint 默认行为一致；调用方可在 extra 里显式关闭。
+            params["add_original_image"] = extra.get("add_original_image", True)
             if is_v4 or is_v5:
                 params["inpaintImg2ImgStrength"] = inpaint_i2i_strength
 

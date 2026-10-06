@@ -532,7 +532,7 @@ class TestInpaint:
         assert results[0].model_name == "nai-diffusion-4-5-full-inpainting"
         assert results[0].generation_params["action"] == "infill"
         assert results[0].generation_params["negative_prompt"] == "identity drift"
-        assert results[0].generation_params["add_original_image"] is False
+        assert results[0].generation_params["add_original_image"] is True
         assert results[0].generation_params["strength"] == 0.55
         assert results[0].generation_params["noise"] == 0.12
         assert results[0].generation_params["inpaint_i2i_strength"] == 0.82
@@ -541,7 +541,7 @@ class TestInpaint:
         assert first_payload["model"] == "nai-diffusion-4-5-full-inpainting"
         assert first_payload["action"] == "infill"
         assert first_payload["parameters"]["seed"] == 12
-        assert first_payload["parameters"]["add_original_image"] is False
+        assert first_payload["parameters"]["add_original_image"] is True
         assert first_payload["parameters"]["params_version"] == 3
         assert first_payload["parameters"]["strength"] == 0.55
         assert first_payload["parameters"]["noise"] == 0.12
@@ -554,6 +554,32 @@ class TestInpaint:
         mask_img = _multipart_png(mock_post.call_args_list[0], "mask")
         # V4 mask is RGBA and quantized to latent grid
         assert mask_img.mode == "RGBA"
+
+        await provider.close()
+
+    @pytest.mark.asyncio
+    async def test_inpaint_add_original_image_can_be_disabled(self):
+        provider = _make_provider()
+        await provider.initialize()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.content = _make_fake_zip_png(512, 768)
+        source = _make_png_bytes(512, 768, (20, 30, 40, 255))
+        mask = _make_png_bytes(512, 768, (255, 255, 255, 255))
+
+        with patch.object(provider._client, "post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+            results = await provider.inpaint(InpaintRequest(
+                image=source,
+                mask=mask,
+                prompt="p",
+                seed=1,
+                extra={"add_original_image": False},
+            ))
+
+        assert results[0].generation_params["add_original_image"] is False
+        payload = _multipart_request_json(mock_post.call_args_list[0])
+        assert payload["parameters"]["add_original_image"] is False
 
         await provider.close()
 

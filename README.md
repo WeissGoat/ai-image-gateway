@@ -76,7 +76,7 @@ NovelAI 凭据按下面顺序解析，避免把密钥写入配置、文档或日
 - `parameters.extra_noise_seed`
 - `parameters.color_correct`
 - `parameters.inpaintImg2ImgStrength`
-- `parameters.add_original_image = false`，默认不把原图附加回结果
+- `parameters.add_original_image = true`，默认叠加原图（Overlay Original Image），蒙版外保持原图像素；可通过 `extra.add_original_image=false` 关闭
 
 inpaint payload 会先按免费档尺寸限制处理源图和 mask，再编码提交，保证
 `parameters.width`、`parameters.height`、`parameters.image` 和 `parameters.mask`
